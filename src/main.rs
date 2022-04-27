@@ -62,15 +62,14 @@ fn main() {
         // if we have an event
         if let Ok(event_success) = event_pending {
             if event_success.is_some() {
-                println!("{:?}", event_success);
-                let event = conn.wait_for_event();
-                match event.unwrap() {
+                match event_success.unwrap() {
                     xcb::Event::X(x::Event::CreateNotify(ev)) => {
                         // set border width
                         conn.send_request(&x::ConfigureWindow {
                             window: ev.window(),
                             value_list: &[x::ConfigWindow::BorderWidth(5)],
                         });
+                        conn.flush();
                         // check the parent window to see if it's the root window
                         if root != ev.parent() {
                             continue;
@@ -129,8 +128,16 @@ fn main() {
                     // change the window's position
                     conn.send_request(&x::ConfigureWindow {
                         window: w.window_id,
-                        value_list: &[x::ConfigWindow::X(w.x as i32), x::ConfigWindow::Y(w.y as i32)],
-                    });
+                        value_list: &[
+                            x::ConfigWindow::X(w.x as i32),
+                            x::ConfigWindow::Y(w.y as i32),
+                    ]});
+                    // set the window's border color
+                    conn.send_request(&x::ChangeWindowAttributes {
+                        window: w.window_id,
+                        value_list: &[
+                            x::Cw::BorderPixel(accent_color as u32),
+                    ]});
                     w.x += 1;
                     w.y += 1;
                     if w.x >= src_width as i16 {
@@ -140,6 +147,7 @@ fn main() {
                         w.y = 0 - w.height as i16;
                     }
                 }
+                conn.flush();
                 now = after;
             }
         }
