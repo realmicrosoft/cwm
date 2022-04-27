@@ -192,8 +192,8 @@ fn main() {
     }
 
     // calculate scaling required to fit the image on the screen
-    let scale_x = (src_width as i32) / (bg_image.width as i32);
-    let scale_y = (src_height as i32) / (bg_image.height as i32);
+    let mut scale_x = (src_width as i32) / (bg_image.width as i32);
+    let mut scale_y = (src_height as i32) / (bg_image.height as i32);
 
     // transform matrix
     let mut transform = [
@@ -203,23 +203,23 @@ fn main() {
     ];
 
     // create picture from pixmap
-    let bg_picture_id = conn.generate_id();
+    let pic_id = conn.generate_id();
     let cookie = conn.send_request_checked(&xcb::render::CreatePicture {
-        pid: bg_picture_id,
+        pid: pic_id,
         drawable: x::Drawable::Pixmap(bg_id),
-        format: pictformat,
+        format: pict_format,
         value_list: &[
         ],
     });
 
     let checked = conn.check_request(cookie);
     if checked.is_err() {
-        println!("Error putting image on pixmap");
+        println!("Error creating picture");
     }
 
-    // transform picture
+    // set picture transform
     let cookie = conn.send_request_checked(&xcb::render::SetPictureTransform {
-        picture: bg_picture_id,
+        picture: pic_id,
         transform: xcb::render::Transform{
             matrix11: transform[0],
             matrix12: transform[1],
@@ -235,54 +235,18 @@ fn main() {
 
     let checked = conn.check_request(cookie);
     if checked.is_err() {
-        println!("Error putting image on pixmap");
-    }
-    // create picture from desktop window
-    let desktop_pic = conn.generate_id();
-    let cookie = conn.send_request_checked(&xcb::render::CreatePicture {
-        pid: desktop_pic,
-        drawable: x::Drawable::Window(desktop_id),
-        format: pictformat,
-        value_list: &[
-        ],
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error putting image on pixmap");
-    }
-
-    // copy the pixmap to the window
-    let cookie = conn.send_request_checked(&xcb::render::Composite {
-        op: xcb::render::PictOp::Over,
-        src: bg_picture_id,
-        mask: xcb::render::Picture::none(),
-        dst: desktop_pic,
-        src_x: 0,
-        src_y: 0,
-        mask_x: 0,
-        mask_y: 0,
-        dst_x: 0,
-        dst_y: 0,
-        width: src_width,
-        height: src_height,
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error putting image on pixmap");
+        println!("Error setting picture transform");
     }
 
     // map the window
-    let cookie = conn.send_request_checked(&x::MapWindow {
+    let cookie = conn.send_request_checked(&xcb::x::MapWindow {
         window: desktop_id,
     });
 
     let checked = conn.check_request(cookie);
     if checked.is_err() {
-        println!("Error putting image on pixmap");
+        println!("Error mapping window");
     }
-
 
     conn.flush().expect("flush failed!");
 
@@ -425,6 +389,7 @@ fn main() {
                                 width: ev.width() as u16,
                                 height: ev.height() as u16,
                             });
+
 
                             let checked = conn.check_request(cookie);
                             if checked.is_err() {
