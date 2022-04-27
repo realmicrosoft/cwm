@@ -162,8 +162,8 @@ fn main() {
         depth: 24,
         pid: bg_id,
         drawable: x::Drawable::Window(desktop_id),
-        width: bg_image.width as u16,
-        height: bg_image.height as u16,
+        width: src_width as u16,
+        height: src_height as u16,
     });
 
     let checked = conn.check_request(cookie);
@@ -191,15 +191,29 @@ fn main() {
         println!("Error putting image on pixmap");
     }
 
-    // calculate scaling required to fit the image on the screen
-    let mut scale_x = (src_width as i32) / (bg_image.width as i32);
-    let mut scale_y = (src_height as i32) / (bg_image.height as i32);
+    // calculate scaling required to stretch the image to the window size
+    let mut aspect_ratio = src_width as f32 / src_height as f32;
 
-    // transform matrix
-    let mut transform = [
-        scale_x, 0, 0,
-        0, scale_y, 0,
-        0, 0, 1,
+    let mut scale_x = 1.0;
+    let mut scale_y = src_width as f32 / bg_image.width as f32;
+
+    // round up scales to the nearest integer
+    if scale_y.fract() > 0.5 {
+        scale_y += 1.0;
+    }
+    if aspect_ratio.fract() > 0.5 {
+        aspect_ratio += 1.0;
+    }
+
+    println!("{}x{}", src_width, src_height);
+    println!("{}", aspect_ratio);
+    println!("{}x{}", scale_x, scale_y);
+
+
+    let transform = [
+        scale_x as i32, 0, 0,
+        0, scale_y as i32, 0,
+        0, 0, aspect_ratio as i32,
     ];
 
     // create picture from pixmap
@@ -236,6 +250,42 @@ fn main() {
     let checked = conn.check_request(cookie);
     if checked.is_err() {
         println!("Error setting picture transform");
+    }
+
+    // get picture of window
+    let desktop_pic_id = conn.generate_id();
+    let cookie = conn.send_request_checked(&xcb::render::CreatePicture {
+        pid: desktop_pic_id,
+        drawable: x::Drawable::Window(desktop_id),
+        format: pict_format,
+        value_list: &[
+        ],
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error creating picture");
+    }
+
+    // composite picture onto window
+    let cookie = conn.send_request_checked(&xcb::render::Composite {
+        op: xcb::render::PictOp::Over,
+        src: pic_id,
+        mask: xcb::render::Picture::none(),
+        dst: desktop_pic_id,
+        src_x: 0,
+        src_y: 0,
+        mask_x: 0,
+        mask_y: 0,
+        dst_x: 0,
+        dst_y: 0,
+        width: src_width,
+        height: src_height,
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error compositing picture");
     }
 
     // map the window
@@ -378,23 +428,24 @@ fn main() {
 
                         // if desktop window, copy pixmap to window
                         if ev.window() == desktop_id {
-                            let cookie = conn.send_request_checked(&x::CopyArea {
-                                src_drawable: x::Drawable::Pixmap(bg_id),
-                                dst_drawable: x::Drawable::Window(ev.window()),
-                                gc: gcon_id,
+                            let cookie = conn.send_request_checked(&xcb::render::Composite {
+                                op: xcb::render::PictOp::Over,
+                                src: pic_id,
+                                mask: xcb::render::Picture::none(),
+                                dst: desktop_pic_id,
                                 src_x: 0,
                                 src_y: 0,
+                                mask_x: 0,
+                                mask_y: 0,
                                 dst_x: 0,
                                 dst_y: 0,
-                                width: ev.width() as u16,
-                                height: ev.height() as u16,
+                                width: src_width,
+                                height: src_height,
                             });
-
 
                             let checked = conn.check_request(cookie);
                             if checked.is_err() {
-                                println!("Error copying pixmap to window");
-                                println!("{:?}", checked);
+                                println!("Error compositing picture");
                             }
                         }
                         conn.flush();
