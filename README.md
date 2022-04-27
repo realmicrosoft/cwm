@@ -7,4 +7,4 @@ as cwm is not yet ready to be used as a main window manager.
 <br>
 to test, first start up xephyr by running something like 
 `Xephyr -ac -screen 1280x720 -br -reset -terminate 2 > /dev/null :1` 
-and then use cargo to build and run cwm!
+and then use cargo to build and run cwm! (remember to prefix with `env DESKTOP=:1` though!)
