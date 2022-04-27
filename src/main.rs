@@ -2,9 +2,11 @@ mod types;
 
 use std::borrow::Borrow;
 use std::ffi::CStr;
+use std::io::Read;
 use std::os::raw::{c_char, c_int, c_ulong};
 use std::ptr::{null, null_mut};
 use std::time::SystemTime;
+use stb_image::image::LoadResult;
 use xcb::{composite, glx, x, Xid, XidNew};
 use crate::types::CumWindow;
 
@@ -69,7 +71,7 @@ fn main() {
         println!("Error redirecting subwindows, is another window manager running?");
     }
 
-    let pictformat: xcb::render::Pictformat;
+    let pictformat: xcb::render::Pictformat = xcb::render::Pictformat::none();
     // get pictformat
     let pict_format_cookie = conn.send_request(&xcb::render::QueryPictFormats {});
     let pict_format_reply = conn.wait_for_reply(pict_format_cookie);
@@ -80,6 +82,135 @@ fn main() {
             pict_format = pict_format_reply.id();
             break;
         }
+    }
+
+    // enable bigreq extension
+    let cookie = conn.send_request(&xcb::bigreq::Enable{});
+
+    let reply = conn.wait_for_reply(cookie);
+    if reply.is_err() {
+        println!("Error enabling bigreq extension");
+    }
+
+    // check maximum request size
+    println!("Maximum request size: {}", reply.unwrap().maximum_request_length());
+
+    // create new window for desktop
+    let desktop_id = conn.generate_id();
+    let cookie = conn.send_request(&x::CreateWindow {
+        depth: x::COPY_FROM_PARENT as u8,
+        wid: desktop_id,
+        parent: root,
+        x: 0,
+        y: 0,
+        width: src_width,
+        height: src_height,
+        border_width: 0,
+        class: x::WindowClass::InputOutput,
+        visual: screen.root_visual(),
+        value_list: &[
+            x::Cw::EventMask(x::EventMask::EXPOSURE),
+        ],
+    });
+
+    conn.flush();
+
+    let gcon_id: x::Gcontext = conn.generate_id();
+    // create a graphics context
+    let cookie = conn.send_request_checked(&xcb::x::CreateGc {
+        cid: gcon_id,
+        drawable: x::Drawable::Window(desktop_id),
+        value_list: &[
+            x::Gc::Foreground(accent_color),
+            x::Gc::GraphicsExposures(true)
+        ],
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error creating graphics context");
+    }
+
+    // create glx context
+    let glx_id = conn.generate_id();
+    let cookie = conn.send_request_checked(&glx::CreateContext {
+        context: glx_id,
+        visual: screen.root_visual(),
+        screen: screen_num as u32,
+        share_list: glx::Context::none(),
+        is_direct: true,
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error creating glx context");
+    }
+
+    // load the bg.png image
+    let bg_image_load = stb_image::image::load("bg.png");
+    let bg_image = match bg_image_load {
+        LoadResult::ImageU8(image) => image,
+        LoadResult::ImageF32(_) => panic!("bg.png is not 8-bit"),
+        LoadResult::Error(e) => panic!("Error loading bg.png: {}", e),
+    };
+
+    // create a pixmap to draw on
+    let bg_id = conn.generate_id();
+    let cookie = conn.send_request_checked(&xcb::x::CreatePixmap {
+        depth: 24,
+        pid: bg_id,
+        drawable: x::Drawable::Window(desktop_id),
+        width: bg_image.width as u16,
+        height: bg_image.height as u16,
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error creating pixmap");
+        println!("{:?}", checked);
+    }
+
+    // put the image on the pixmap
+    let cookie = conn.send_request_checked(&xcb::x::PutImage {
+        drawable: x::Drawable::Pixmap(bg_id),
+        gc: gcon_id,
+        width: bg_image.width as u16,
+        height: bg_image.height as u16,
+        dst_x: 0,
+        dst_y: 0,
+        left_pad: 0,
+        depth: 24,
+        format: x::ImageFormat::ZPixmap,
+        data: &bg_image.data,
+    });
+
+    // copy the pixmap to the window
+    let cookie = conn.send_request_checked(&xcb::x::CopyArea {
+        src_drawable: x::Drawable::Pixmap(bg_id),
+        dst_drawable: x::Drawable::Window(desktop_id),
+        gc: gcon_id,
+        src_x: 0,
+        src_y: 0,
+        dst_x: 0,
+        dst_y: 0,
+        width: 720 as u16,
+        height: 720 as u16,
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error copying pixmap to window");
+        println!("{:?}", checked);
+    }
+
+    // map the window
+    let cookie = conn.send_request_checked(&x::MapWindow {
+        window: desktop_id,
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error putting image on pixmap");
     }
 
     conn.flush();
@@ -209,6 +340,28 @@ fn main() {
                         conn.send_request(&x::MapWindow {
                             window: ev.window(),
                         });
+
+                        // if desktop window, copy pixmap to window
+                        if ev.window() == desktop_id {
+                            let cookie = conn.send_request_checked(&x::CopyArea {
+                                src_drawable: x::Drawable::Pixmap(bg_id),
+                                dst_drawable: x::Drawable::Window(ev.window()),
+                                gc: gcon_id,
+                                src_x: 0,
+                                src_y: 0,
+                                dst_x: 0,
+                                dst_y: 0,
+                                width: ev.width() as u16,
+                                height: ev.height() as u16,
+                            });
+
+                            let checked = conn.check_request(cookie);
+                            if checked.is_err() {
+                                println!("Error copying pixmap to window");
+                                println!("{:?}", checked);
+                            }
+                        }
+                        conn.flush();
                     },
                     _ => {}
                 }
@@ -222,7 +375,7 @@ fn main() {
                 let mut g = ((frequency * (t as f64) + 2.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
                 let mut b = ((frequency * (t as f64) + 4.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
 
-                accent_color = (((r << 16) | (g << 8) | (b)) | 0xFF000000);
+                accent_color = (((r << 16) | (g << 8) | (b)) | 0xFF000000) as u32;
                 t += 1;
 
                 // get root pixmap
@@ -265,28 +418,15 @@ fn main() {
                         ],
                     });
 
-                    // draw black rectangle so that we don't get the previous window
-                    conn.send_request(&xcb::render::FillRectangles {
-                        op: xcb::render::PictOp::Clear,
-                        dst: r_id,
-                        color: xcb::render::Color{red: 0, green: 0, blue: 0, alpha: 100},
-                        rects: &[
-                            xcb::x::Rectangle{
-                                x: w.x as i16 - 5,
-                                y: w.y as i16 - 5,
-                                width: w.width as u16 + 10,
-                                height: w.height as u16 + 10,
-                            },
-                        ],
-                    });
-
-                    w.x += 1;
-                    w.y += 1;
-                    if w.x >= src_width as i16 {
-                        w.x = 0 - w.width as i16;
-                    }
-                    if w.y >= src_height as i16 {
-                        w.y = 0 - w.height as i16;
+                    if desktop_id != w.window_id {
+                        w.x += 1;
+                        w.y += 1;
+                        if w.x >= src_width as i16 {
+                            w.x = 0 - w.width as i16;
+                        }
+                        if w.y >= src_height as i16 {
+                            w.y = 0 - w.height as i16;
+                        }
                     }
 
                     // composite render pixmap onto window
