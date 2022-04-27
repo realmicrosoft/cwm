@@ -1,2 +1,2 @@
 # cwm
-cwm (pronounced "coom") - the cursed window manager
+cwm (pronounced "coom") - the CHAOTIC window manager
