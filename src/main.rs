@@ -1,4 +1,5 @@
 mod types;
+mod helpers;
 
 use std::borrow::Borrow;
 use std::ffi::CStr;
@@ -9,6 +10,7 @@ use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use xcb::{composite, glx, x, Xid, XidNew};
 use crate::types::CumWindow;
+use crate::helpers::rgba_to_bgra;
 
 /*
 unsafe extern "C" fn error_handler(display: *mut Display, error_event: *mut XErrorEvent) -> c_int {
@@ -181,26 +183,94 @@ fn main() {
         left_pad: 0,
         depth: 24,
         format: x::ImageFormat::ZPixmap,
-        data: &bg_image.data,
-    });
-
-    // copy the pixmap to the window
-    let cookie = conn.send_request_checked(&xcb::x::CopyArea {
-        src_drawable: x::Drawable::Pixmap(bg_id),
-        dst_drawable: x::Drawable::Window(desktop_id),
-        gc: gcon_id,
-        src_x: 0,
-        src_y: 0,
-        dst_x: 0,
-        dst_y: 0,
-        width: 720 as u16,
-        height: 720 as u16,
+        data: &rgba_to_bgra(&bg_image.data),
     });
 
     let checked = conn.check_request(cookie);
     if checked.is_err() {
-        println!("Error copying pixmap to window");
-        println!("{:?}", checked);
+        println!("Error putting image on pixmap");
+    }
+
+    // calculate scaling required to fit the image on the screen
+    let scale_x = (src_width as i32) / (bg_image.width as i32);
+    let scale_y = (src_height as i32) / (bg_image.height as i32);
+
+    // transform matrix
+    let mut transform = [
+        scale_x, 0, 0,
+        0, scale_y, 0,
+        0, 0, 1,
+    ];
+
+    // create picture from pixmap
+    let bg_picture_id = conn.generate_id();
+    let cookie = conn.send_request_checked(&xcb::render::CreatePicture {
+        pid: bg_picture_id,
+        drawable: x::Drawable::Pixmap(bg_id),
+        format: pictformat,
+        value_list: &[
+        ],
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error putting image on pixmap");
+    }
+
+    // transform picture
+    let cookie = conn.send_request_checked(&xcb::render::SetPictureTransform {
+        picture: bg_picture_id,
+        transform: xcb::render::Transform{
+            matrix11: transform[0],
+            matrix12: transform[1],
+            matrix13: transform[2],
+            matrix21: transform[3],
+            matrix22: transform[4],
+            matrix23: transform[5],
+            matrix31: transform[6],
+            matrix32: transform[7],
+            matrix33: transform[8],
+        },
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error putting image on pixmap");
+    }
+    // create picture from desktop window
+    let desktop_pic = conn.generate_id();
+    let cookie = conn.send_request_checked(&xcb::render::CreatePicture {
+        pid: desktop_pic,
+        drawable: x::Drawable::Window(desktop_id),
+        format: pictformat,
+        value_list: &[
+        ],
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error putting image on pixmap");
+    }
+
+    // copy the pixmap to the window
+    let cookie = conn.send_request_checked(&xcb::render::Composite {
+        op: xcb::render::PictOp::Over,
+        src: bg_picture_id,
+        mask: xcb::render::Picture::none(),
+        dst: desktop_pic,
+        src_x: 0,
+        src_y: 0,
+        mask_x: 0,
+        mask_y: 0,
+        dst_x: 0,
+        dst_y: 0,
+        width: src_width,
+        height: src_height,
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error putting image on pixmap");
     }
 
     // map the window
@@ -213,7 +283,8 @@ fn main() {
         println!("Error putting image on pixmap");
     }
 
-    conn.flush();
+
+    conn.flush().expect("flush failed!");
 
     let mut now = SystemTime::now();
     let mut t = 0;
