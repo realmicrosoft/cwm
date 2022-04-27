@@ -1,14 +1,10 @@
 mod types;
 mod helpers;
 
-use std::borrow::Borrow;
-use std::ffi::CStr;
-use std::io::Read;
-use std::os::raw::{c_char, c_int, c_ulong};
-use std::ptr::{null, null_mut};
+use std::os::raw::{c_ulong};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
-use xcb::{composite, glx, x, Xid, XidNew};
+use xcb::{composite, glx, x, Xid};
 use crate::types::CumWindow;
 use crate::helpers::rgba_to_bgra;
 
@@ -73,7 +69,6 @@ fn main() {
         println!("Error redirecting subwindows, is another window manager running?");
     }
 
-    let pictformat: xcb::render::Pictformat = xcb::render::Pictformat::none();
     // get pictformat
     let pict_format_cookie = conn.send_request(&xcb::render::QueryPictFormats {});
     let pict_format_reply = conn.wait_for_reply(pict_format_cookie);
@@ -99,7 +94,7 @@ fn main() {
 
     // create new window for desktop
     let desktop_id = conn.generate_id();
-    let cookie = conn.send_request(&x::CreateWindow {
+    conn.send_request(&x::CreateWindow {
         depth: x::COPY_FROM_PARENT as u8,
         wid: desktop_id,
         parent: root,
@@ -115,7 +110,7 @@ fn main() {
         ],
     });
 
-    conn.flush();
+    conn.flush().expect("Could not flush");
 
     let gcon_id: x::Gcontext = conn.generate_id();
     // create a graphics context
@@ -194,7 +189,7 @@ fn main() {
     // calculate scaling required to stretch the image to the window size
     let mut aspect_ratio = src_width as f32 / src_height as f32;
 
-    let mut scale_x = 1.0;
+    let scale_x = 1.0;
     let mut scale_y = src_width as f32 / bg_image.width as f32;
 
     // round up scales to the nearest integer
@@ -316,23 +311,16 @@ fn main() {
                             value_list: &[x::ConfigWindow::BorderWidth(5)],
                         });
 
-                        conn.flush();
+                        conn.flush().expect("flush failed!");
 
                         // check the parent window to see if it's the root window
                         if root != ev.parent() {
                             continue;
                         }
 
-                        // get window attributes
-                        let attr_cookie = conn.send_request(&x::GetWindowAttributes {
-                            window: ev.window(),
-                        });
-
-                        let attr_reply = conn.wait_for_reply(attr_cookie);
-
                         // get pixmap for window
                         let p_id = conn.generate_id();
-                        let w_pixmap = conn.send_request(&xcb::render::CreatePicture{
+                        conn.send_request(&xcb::render::CreatePicture{
                             pid: p_id,
                             drawable: x::Drawable::Window(ev.window()),
                             format: pict_format,
@@ -343,7 +331,7 @@ fn main() {
 
                         // create copy of window bounding region
                         let r_id = conn.generate_id();
-                        let w_region = conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
+                        conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
                             region: r_id,
                             window: ev.window(),
                             kind: xcb::shape::Sk::Bounding,
@@ -448,7 +436,7 @@ fn main() {
                                 println!("Error compositing picture");
                             }
                         }
-                        conn.flush();
+                        conn.flush().expect("Error flushing");
                     },
                     _ => {}
                 }
@@ -458,16 +446,16 @@ fn main() {
             if after.duration_since(now).unwrap().as_millis() > 10 {
                 // generate the rainbow using a sine wave
                 let frequency = 0.05;
-                let mut r = ((frequency * (t as f64) + 0.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
-                let mut g = ((frequency * (t as f64) + 2.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
-                let mut b = ((frequency * (t as f64) + 4.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
+                let r = ((frequency * (t as f64) + 0.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
+                let g = ((frequency * (t as f64) + 2.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
+                let b = ((frequency * (t as f64) + 4.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
 
                 accent_color = (((r << 16) | (g << 8) | (b)) | 0xFF000000) as u32;
                 t += 1;
 
                 // get root pixmap
                 let r_id = conn.generate_id();
-                let r_pixmap = conn.send_request(&xcb::render::CreatePicture{
+                conn.send_request(&xcb::render::CreatePicture{
                     pid: r_id,
                     drawable: x::Drawable::Window(root),
                     format: pict_format,
@@ -492,11 +480,11 @@ fn main() {
                             x::Cw::BorderPixel(accent_color as u32),
                     ]});
 
-                    conn.flush();
+                    conn.flush().expect("Error flushing");
 
                     // get window pixmap
                     let p_id = conn.generate_id();
-                    let w_pixmap = conn.send_request(&xcb::render::CreatePicture{
+                    conn.send_request(&xcb::render::CreatePicture{
                         pid: p_id,
                         drawable: x::Drawable::Window(w.window_id),
                         format: pict_format,
@@ -532,7 +520,7 @@ fn main() {
                         height: w.height as u16 + 10,
                     });
                 }
-                conn.flush();
+                conn.flush().expect("Error flushing");
                 now = after;
             }
         }

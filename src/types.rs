@@ -1,5 +1,3 @@
-use xcb::x;
-use xcb::x::Window;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CumWindow {
@@ -7,7 +5,7 @@ pub struct CumWindow {
     pub y: i16,
     pub width: u16,
     pub height: u16,
-    pub window_id: Window,
+    pub window_id: xcb::x::Window,
     pub pixmap_id: xcb::render::Picture,
     pub region_id: xcb::xfixes::Region,
     pub is_opening: bool,
