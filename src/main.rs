@@ -1,12 +1,11 @@
 mod types;
 mod helpers;
 
+use std::num::NonZeroU32;
 use std::os::raw::{c_ulong};
 use std::time::SystemTime;
-use resize::Pixel::RGBA8;
-use resize::px::RGBA;
-use resize::Type::Lanczos3;
 use stb_image::image::LoadResult;
+use fast_image_resize as fr;
 use xcb::{composite, glx, x, Xid};
 use crate::types::CumWindow;
 use crate::helpers::rgba_to_bgra;
@@ -154,37 +153,47 @@ fn main() {
         LoadResult::Error(e) => panic!("Error loading bg.png: {}", e),
     };
 
-    let mut src = vec![RGBA::new(0,0,0,0); bg_image.width as usize * bg_image.height as usize];
+    let bg_image_width = NonZeroU32::new(bg_image.width as u32).unwrap();
+    let bg_image_height = NonZeroU32::new(bg_image.height as u32).unwrap();
 
-    // copy the image data into the src vector
-    let mut i = 0;
-    while i < bg_image.data.len() {
-        let r = bg_image.data[i];
-        let g = bg_image.data[i + 1];
-        let b = bg_image.data[i + 2];
-        let a = bg_image.data[i + 3];
-        src[i / 4] = RGBA::new(r, g, b, a);
-        i += 4;
+    let mut divide_factor = 1;
+    let mut potential_size: u32 = (src_width / divide_factor) as u32 * (src_height / divide_factor) as u32;
+    // calculate the amount of bytes that src_width * src_height * 4 will take
+    while potential_size > 300000 {
+        divide_factor += 1;
+        potential_size = (src_width / divide_factor) as u32 * (src_height / divide_factor) as u32;
     }
 
-    let mut dst = vec![RGBA::new(0,0,0,0); src_width as usize * src_height as usize];
-    let mut resizer = resize::new(bg_image.width, bg_image.height, src_width as usize, src_height as usize, RGBA8, Lanczos3);
-    // is resizer ok?
-    if resizer.is_ok() {
-        resizer.expect("resizer failed to unwrap").resize(&src, &mut dst);
-    } else {
-        println!("Error resizing bg.png");
-    }
+    let mut src = fr::Image::from_vec_u8(
+        bg_image_width,
+        bg_image_height,
+        bg_image.data.clone(),
+        fr::PixelType::U8x4
+    ).unwrap();
+    // Create MulDiv instance
+    let alpha_mul_div = fr::MulDiv::default();
+    // Multiple RGB channels of source image by alpha channel
+    alpha_mul_div
+        .multiply_alpha_inplace(&mut src.view_mut())
+        .unwrap();
 
-    let mut bg_image_data = vec![0; dst.len() * 4];
-    let mut i = 0;
-    while i < dst.len() {
-        bg_image_data.push(dst[i].r);
-        bg_image_data.push(dst[i].g);
-        bg_image_data.push(dst[i].b);
-        bg_image_data.push(255);
-        i += 4;
-    }
+    let dst_width = NonZeroU32::new((src_width/divide_factor) as u32).unwrap();
+    let dst_height = NonZeroU32::new((src_height/divide_factor) as u32).unwrap();
+    let mut dst_image = fr::Image::new(
+        dst_width,
+        dst_height,
+        fr::PixelType::U8x4
+    );
+    let mut dst_view = dst_image.view_mut();
+
+    let mut resizer = fr::Resizer::new(
+        fr::ResizeAlg::Convolution(fr::FilterType::Lanczos3),
+    );
+    resizer.resize(&src.view(), &mut dst_view).unwrap();
+
+    alpha_mul_div.divide_alpha_inplace(&mut dst_view).unwrap();
+
+    let bg_image_data = dst_image.buffer();
 
     // create a pixmap to draw on
     let bg_id = conn.generate_id();
@@ -192,8 +201,8 @@ fn main() {
         depth: 24,
         pid: bg_id,
         drawable: x::Drawable::Window(desktop_id),
-        width: src_width as u16,
-        height: src_height as u16,
+        width: (src_width/divide_factor) as u16,
+        height: (src_height/divide_factor) as u16,
     });
 
     let checked = conn.check_request(cookie);
@@ -206,20 +215,28 @@ fn main() {
     let cookie = conn.send_request_checked(&xcb::x::PutImage {
         drawable: x::Drawable::Pixmap(bg_id),
         gc: gcon_id,
-        width: bg_image.width as u16,
-        height: bg_image.height as u16,
+        width: (src_width/divide_factor) as u16,
+        height: (src_height/divide_factor) as u16,
         dst_x: 0,
         dst_y: 0,
         left_pad: 0,
         depth: 24,
         format: x::ImageFormat::ZPixmap,
-        data: &rgba_to_bgra(&bg_image_data),
+        data: &rgba_to_bgra(bg_image_data),
     });
 
     let checked = conn.check_request(cookie);
     if checked.is_err() {
         println!("Error putting image on pixmap");
+        println!("{:?}", checked);
     }
+
+    // calculate the amount of times to multiply the image by
+    let transform = [
+        1, 0, 0,
+        0, 1, 0,
+        0, 0, divide_factor as i32,
+    ];
 
     // create picture from pixmap
     let pic_id = conn.generate_id();
@@ -230,10 +247,30 @@ fn main() {
         value_list: &[
         ],
     });
-
     let checked = conn.check_request(cookie);
     if checked.is_err() {
         println!("Error creating picture");
+    }
+
+    // set picture transform
+    let cookie = conn.send_request_checked(&xcb::render::SetPictureTransform {
+        picture: pic_id,
+        transform: xcb::render::Transform{
+            matrix11: transform[0],
+            matrix12: transform[1],
+            matrix13: transform[2],
+            matrix21: transform[3],
+            matrix22: transform[4],
+            matrix23: transform[5],
+            matrix31: transform[6],
+            matrix32: transform[7],
+            matrix33: transform[8],
+        },
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error setting picture transform");
     }
 
     // get picture of window
@@ -405,6 +442,7 @@ fn main() {
 
                         // if desktop window, copy pixmap to window
                         if ev.window() == desktop_id {
+
                             let cookie = conn.send_request_checked(&xcb::render::Composite {
                                 op: xcb::render::PictOp::Over,
                                 src: pic_id,

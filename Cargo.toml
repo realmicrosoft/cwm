@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 xcb = { version = "1.1.1", features = ["composite", "glx", "xfixes", "shape"] }
 stb_image = "0.2.4"
-resize = "0.7.2"
+fast_image_resize = "0.8.0"
