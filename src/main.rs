@@ -323,6 +323,9 @@ fn main() {
 
     let mut now = SystemTime::now();
     let mut t = 0;
+    let mut need_redraw = true;
+    let mut window_active = 0;
+    let mut dragging = false;
 
     loop {
         let event_pending = conn.poll_for_event();
@@ -331,13 +334,14 @@ fn main() {
             if event_success.is_some() {
                 match event_success.unwrap() {
                     xcb::Event::X(x::Event::CreateNotify(ev)) => {
-                        // set border width
-                        conn.send_request(&x::ConfigureWindow {
-                            window: ev.window(),
-                            value_list: &[x::ConfigWindow::BorderWidth(5)],
-                        });
+                        if ev.window() != desktop_id {
+                            conn.send_request(&x::ConfigureWindow {
+                                window: ev.window(),
+                                value_list: &[x::ConfigWindow::BorderWidth(5)],
+                            });
 
-                        conn.flush().expect("flush failed!");
+                            conn.flush().expect("flush failed!");
+                        }
 
                         // check the parent window to see if it's the root window
                         if root != ev.parent() {
@@ -479,7 +483,10 @@ fn main() {
 
                 accent_color = (((r << 16) | (g << 8) | (b)) | 0xFF000000) as u32;
                 t += 1;
+                need_redraw = true;
+            }
 
+            if need_redraw {
                 // get root pixmap
                 let r_id = conn.generate_id();
                 conn.send_request(&xcb::render::CreatePicture{
@@ -493,21 +500,16 @@ fn main() {
 
                 // for each window, move it by 1 up and 1 right
                 for w in windows.iter_mut() {
-                    // change the window's position
-                    conn.send_request(&x::ConfigureWindow {
-                        window: w.window_id,
-                        value_list: &[
-                            x::ConfigWindow::X(w.x as i32),
-                            x::ConfigWindow::Y(w.y as i32),
-                    ]});
                     // set the window's border color
-                    conn.send_request(&x::ChangeWindowAttributes {
-                        window: w.window_id,
-                        value_list: &[
-                            x::Cw::BorderPixel(accent_color as u32),
-                    ]});
+                    if desktop_id != w.window_id {
+                        conn.send_request(&x::ChangeWindowAttributes {
+                            window: w.window_id,
+                            value_list: &[
+                                x::Cw::BorderPixel(accent_color as u32),
+                            ]});
 
-                    conn.flush().expect("Error flushing");
+                        conn.flush().expect("Error flushing");
+                    }
 
                     // get window pixmap
                     let p_id = conn.generate_id();
@@ -520,35 +522,43 @@ fn main() {
                         ],
                     });
 
-                    if desktop_id != w.window_id {
-                        w.x += 1;
-                        w.y += 1;
-                        if w.x >= src_width as i16 {
-                            w.x = 0 - w.width as i16;
-                        }
-                        if w.y >= src_height as i16 {
-                            w.y = 0 - w.height as i16;
-                        }
-                    }
-
                     // composite render pixmap onto window
-                    conn.send_request(&xcb::render::Composite {
-                        op: xcb::render::PictOp::Over,
-                        src: p_id,
-                        mask: xcb::render::Picture::none(),
-                        dst: r_id,
-                        src_x: -5,
-                        src_y: -5,
-                        mask_x: 0,
-                        mask_y: 0,
-                        dst_x: w.x - 5,
-                        dst_y: w.y - 5,
-                        width: w.width as u16 + 10,
-                        height: w.height as u16 + 10,
-                    });
+                    if desktop_id != w.window_id {
+                        conn.send_request(&xcb::render::Composite {
+                            op: xcb::render::PictOp::Over,
+                            src: p_id,
+                            mask: xcb::render::Picture::none(),
+                            dst: r_id,
+                            src_x: -5,
+                            src_y: -5,
+                            mask_x: 0,
+                            mask_y: 0,
+                            dst_x: w.x,
+                            dst_y: w.y,
+                            width: w.width as u16 + 10,
+                            height: w.height as u16 + 10,
+                        });
+                    } else {
+                        conn.send_request(&xcb::render::Composite {
+                            op: xcb::render::PictOp::Over,
+                            src: p_id,
+                            mask: xcb::render::Picture::none(),
+                            dst: r_id,
+                            src_x: 0,
+                            src_y: 0,
+                            mask_x: 0,
+                            mask_y: 0,
+                            dst_x: w.x,
+                            dst_y: w.y,
+                            width: w.width as u16,
+                            height: w.height as u16,
+                        });
+                    }
                 }
                 conn.flush().expect("Error flushing");
                 now = after;
+
+                need_redraw = false;
             }
         }
     }
