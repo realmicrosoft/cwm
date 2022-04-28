@@ -39,6 +39,65 @@ fn redraw_desktop(conn: &Connection, pic_id: xcb::render::Picture, desktop_pic_i
     }
 }
 
+fn load_image(conn: &Connection, root: x::Window, gcon_id: x::Gcontext, pict_format: xcb::render::Pictformat, image_name: &str) -> xcb::render::Picture {// load the bg.png image
+    let bg_image_load = stb_image::image::load(image_name);
+    let bg_image = match bg_image_load {
+        LoadResult::ImageU8(image) => image,
+        LoadResult::ImageF32(_) => panic!("{} is not 8-bit", image_name),
+        LoadResult::Error(e) => panic!("Error loading {}: {}", image_name, e),
+    };
+
+    // create a pixmap to draw on
+    let bg_id = conn.generate_id();
+    let cookie = conn.send_request_checked(&xcb::x::CreatePixmap {
+        depth: 24,
+        pid: bg_id,
+        drawable: x::Drawable::Window(root),
+        width: bg_image.width as u16,
+        height: bg_image.height as u16,
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error creating pixmap");
+        println!("{:?}", checked);
+    }
+
+    // put the image on the pixmap
+    let cookie = conn.send_request_checked(&xcb::x::PutImage {
+        drawable: x::Drawable::Pixmap(bg_id),
+        gc: gcon_id,
+        width: bg_image.width as u16,
+        height: bg_image.height as u16,
+        dst_x: 0,
+        dst_y: 0,
+        left_pad: 0,
+        depth: 24,
+        format: x::ImageFormat::ZPixmap,
+        data: &rgba_to_bgra(&bg_image.data),
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error putting image on pixmap");
+        println!("{:?}", checked);
+    }
+
+    // create picture from pixmap
+    let pic_id = conn.generate_id();
+    let cookie = conn.send_request_checked(&xcb::render::CreatePicture {
+        pid: pic_id,
+        drawable: x::Drawable::Pixmap(bg_id),
+        format: pict_format,
+        value_list: &[],
+    });
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error creating picture");
+    }
+    pic_id
+}
+
 fn main() {
     let (conn, screen_num) = xcb::Connection::connect(None).expect("Failed to connect to X server");
     let setup = conn.get_setup();
@@ -322,22 +381,23 @@ fn main() {
         println!("Error mapping window");
     }
 
-    // grab the mouse
-    let cookie = conn.send_request_checked(&xcb::x::GrabButton {
+    // grab pointer for drawing the cursor
+    let cookie = conn.send_request(&xcb::x::GrabPointer {
         owner_events: true,
         grab_window: root,
-        event_mask: x::EventMask::BUTTON_PRESS | x::EventMask::BUTTON_RELEASE | x::EventMask::POINTER_MOTION,
+        event_mask: x::EventMask::POINTER_MOTION,
         pointer_mode: x::GrabMode::Async,
         keyboard_mode: x::GrabMode::Async,
         confine_to: x::Window::none(),
         cursor: x::Cursor::none(),
-        button: x::ButtonIndex::Any,
-        modifiers: x::ModMask::empty(),
+        time: x::CURRENT_TIME,
     });
 
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error grabbing mouse");
+    let cursor_image = load_image(&conn, root, gcon_id, pict_format, "cursor.png");
+
+    let reply = conn.wait_for_reply(cookie).unwrap();
+    if reply.status() != x::GrabStatus::Success {
+        println!("Error grabbing pointer");
     }
 
     conn.flush().expect("flush failed!");
@@ -347,6 +407,9 @@ fn main() {
     let mut need_redraw = true;
     let mut window_active = 0;
     let mut dragging = false;
+
+    let mut cursor_x = 0;
+    let mut cursor_y = 0;
 
     loop {
         let event_pending = conn.poll_for_event();
@@ -370,10 +433,8 @@ fn main() {
                                 }
                             }
                             if !found {
-
                                 let centre_x = (src_width / 2) - (ev.width() / 2);
                                 let centre_y = (src_height / 2) - (ev.height() / 2);
-
                                 // change the main window to be in the centre of the screen
                                 conn.send_request(&xcb::x::ConfigureWindow {
                                     window: ev.window(),
@@ -382,10 +443,7 @@ fn main() {
                                         x::ConfigWindow::Y(centre_y as i32),
                                     ],
                                 });
-
                                 conn.flush().expect("flush failed!");
-
-
                                 // get pixmap for window
                                 let p_id = conn.generate_id();
                                 conn.send_request(&xcb::render::CreatePicture {
@@ -396,7 +454,6 @@ fn main() {
                                         xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
                                     ],
                                 });
-
                                 // create copy of window bounding region
                                 let r_id = conn.generate_id();
                                 conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
@@ -404,7 +461,6 @@ fn main() {
                                     window: ev.window(),
                                     kind: xcb::shape::Sk::Bounding,
                                 });
-
                                 // translate it
                                 conn.send_request(&xcb::xfixes::TranslateRegion {
                                     region: r_id,
@@ -417,7 +473,6 @@ fn main() {
                                     x_origin: 0,
                                     y_origin: 0,
                                 });
-
                                 // create the frame
                                 let frame_id = conn.generate_id();
                                 conn.send_request(&xcb::x::CreateWindow {
@@ -436,15 +491,11 @@ fn main() {
                                         x::Cw::EventMask(x::EventMask::BUTTON_PRESS | x::EventMask::BUTTON_RELEASE | x::EventMask::EXPOSURE),
                                     ],
                                 });
-
                                 // map the frame
                                 conn.send_request(&xcb::x::MapWindow {
                                     window: frame_id,
                                 });
-
-
                                 conn.flush().expect("flush failed!");
-
                                 windows.push(CumWindow {
                                     window_id: ev.window(),
                                     frame_id,
@@ -463,6 +514,7 @@ fn main() {
                     }
                     xcb::Event::X(x::Event::DestroyNotify(ev)) => {
                         // find the window in the list
+                        need_redraw = true;
                         let mut found = false;
                         for w in windows.clone().iter_mut() {
                             if w.window_id == ev.window() {
@@ -493,14 +545,12 @@ fn main() {
                         for w in windows.iter_mut() {
                             if w.window_id == ev.window() {
                                 found = true;
-
                                 // update bounding region
                                 conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
                                     region: w.region_id,
                                     window: ev.window(),
                                     kind: xcb::shape::Sk::Bounding,
                                 });
-
                                 // translate it
                                 conn.send_request(&xcb::xfixes::TranslateRegion {
                                     region: w.region_id,
@@ -513,7 +563,6 @@ fn main() {
                                     x_origin: 0,
                                     y_origin: 0,
                                 });
-
                                 // update frame window position
                                 conn.send_request(&xcb::x::ConfigureWindow {
                                     window: w.frame_id,
@@ -524,7 +573,6 @@ fn main() {
                                         x::ConfigWindow::Height(ev.height() as u32 + 20),
                                     ],
                                 });
-
                                 w.x = ev.x();
                                 w.y = ev.y();
                                 w.width = ev.width();
@@ -543,7 +591,6 @@ fn main() {
                         conn.send_request(&x::MapWindow {
                             window: ev.window(),
                         });
-
                         // if desktop window, copy pixmap to window
                         if ev.window() == desktop_id {
                             redraw_desktop(&conn, pic_id, desktop_pic_id, src_width, src_height);
@@ -585,6 +632,7 @@ fn main() {
             }
 
             if need_redraw {
+                conn.flush().expect("Error flushing");
                 // get root pixmap
                 let r_id = conn.generate_id();
                 conn.send_request(&xcb::render::CreatePicture {
@@ -686,6 +734,7 @@ fn main() {
                         });
                     } else {}
                 }
+
                 conn.flush().expect("Error flushing");
                 now = after;
 
