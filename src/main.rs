@@ -613,13 +613,18 @@ fn main() {
                                 tmp += 1;
                             }
                         }
+                    },
+                    xcb::Event::X(x::Event::MotionNotify(ev)) => {
+                        // move cursor position
+                        cursor_x = ev.root_x();
+                        cursor_y = ev.root_y();
                     }
                     _ => {}
                 }
             }
 
             let after = SystemTime::now();
-            if after.duration_since(now).unwrap().as_millis() > 10 {
+            if after.duration_since(now).unwrap().as_millis() > (1/60) {
                 // generate the rainbow using a sine wave
                 let frequency = 0.05;
                 let r = ((frequency * (t as f64) + 0.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
@@ -734,6 +739,22 @@ fn main() {
                         });
                     } else {}
                 }
+
+                // composite cursor onto root
+                conn.send_request(&xcb::render::Composite {
+                    op: xcb::render::PictOp::Over,
+                    src: cursor_image,
+                    mask: xcb::render::Picture::none(),
+                    dst: r_id,
+                    src_x: 0,
+                    src_y: 0,
+                    mask_x: 0,
+                    mask_y: 0,
+                    dst_x: cursor_x,
+                    dst_y: cursor_y,
+                    width: 16 as u16,
+                    height: 16 as u16,
+                });
 
                 conn.flush().expect("Error flushing");
                 now = after;
