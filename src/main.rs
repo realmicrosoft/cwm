@@ -6,7 +6,7 @@ use std::os::raw::{c_ulong};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use xcb::{composite, glx, x, Xid};
+use xcb::{composite, Connection, glx, x, Xid};
 use crate::types::CumWindow;
 use crate::helpers::rgba_to_bgra;
 
@@ -16,6 +16,28 @@ unsafe extern "C" fn error_handler(display: *mut Display, error_event: *mut XErr
     0
 }
  */
+
+fn redraw_desktop(conn: &Connection, pic_id: xcb::render::Picture, desktop_pic_id: xcb::render::Picture, src_width: u16, src_height: u16) {
+    let cookie = conn.send_request_checked(&xcb::render::Composite {
+        op: xcb::render::PictOp::Over,
+        src: pic_id,
+        mask: xcb::render::Picture::none(),
+        dst: desktop_pic_id,
+        src_x: 0,
+        src_y: 0,
+        mask_x: 0,
+        mask_y: 0,
+        dst_x: 0,
+        dst_y: 0,
+        width: src_width,
+        height: src_height,
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error compositing picture");
+    }
+}
 
 fn main() {
     let (conn, screen_num) = xcb::Connection::connect(None).expect("Failed to connect to X server");
@@ -39,15 +61,16 @@ fn main() {
         value_list: &[
             x::Cw::EventMask(
                 x::EventMask::BUTTON_PRESS |
-                x::EventMask::BUTTON_RELEASE |
-                x::EventMask::KEY_PRESS |
-                x::EventMask::KEY_RELEASE |
-                x::EventMask::EXPOSURE |
-                x::EventMask::SUBSTRUCTURE_NOTIFY |
-                //x::EventMask::SUBSTRUCTURE_REDIRECT |
-                x::EventMask::STRUCTURE_NOTIFY
+                    x::EventMask::BUTTON_RELEASE |
+                    x::EventMask::KEY_PRESS |
+                    x::EventMask::KEY_RELEASE |
+                    x::EventMask::EXPOSURE |
+                    x::EventMask::SUBSTRUCTURE_NOTIFY |
+                    //x::EventMask::SUBSTRUCTURE_REDIRECT |
+                    x::EventMask::STRUCTURE_NOTIFY
             )
-        ],});
+        ],
+    });
 
     let checked = conn.check_request(cookie);
     if checked.is_err() {
@@ -55,7 +78,7 @@ fn main() {
     }
 
     // query version of composite extension so that we get a panic early on if it's not available
-     conn.send_request(&xcb::composite::QueryVersion {
+    conn.send_request(&xcb::composite::QueryVersion {
         client_major_version: 1,
         client_minor_version: 0,
     });
@@ -84,7 +107,7 @@ fn main() {
     }
 
     // enable bigreq extension
-    let cookie = conn.send_request(&xcb::bigreq::Enable{});
+    let cookie = conn.send_request(&xcb::bigreq::Enable {});
 
     let reply = conn.wait_for_reply(cookie);
     if reply.is_err() {
@@ -168,7 +191,7 @@ fn main() {
         bg_image_width,
         bg_image_height,
         bg_image.data.clone(),
-        fr::PixelType::U8x4
+        fr::PixelType::U8x4,
     ).unwrap();
     // Create MulDiv instance
     let alpha_mul_div = fr::MulDiv::default();
@@ -177,12 +200,12 @@ fn main() {
         .multiply_alpha_inplace(&mut src.view_mut())
         .unwrap();
 
-    let dst_width = NonZeroU32::new((src_width/divide_factor) as u32).unwrap();
-    let dst_height = NonZeroU32::new((src_height/divide_factor) as u32).unwrap();
+    let dst_width = NonZeroU32::new((src_width / divide_factor) as u32).unwrap();
+    let dst_height = NonZeroU32::new((src_height / divide_factor) as u32).unwrap();
     let mut dst_image = fr::Image::new(
         dst_width,
         dst_height,
-        fr::PixelType::U8x4
+        fr::PixelType::U8x4,
     );
     let mut dst_view = dst_image.view_mut();
 
@@ -201,8 +224,8 @@ fn main() {
         depth: 24,
         pid: bg_id,
         drawable: x::Drawable::Window(desktop_id),
-        width: (src_width/divide_factor) as u16,
-        height: (src_height/divide_factor) as u16,
+        width: (src_width / divide_factor) as u16,
+        height: (src_height / divide_factor) as u16,
     });
 
     let checked = conn.check_request(cookie);
@@ -215,8 +238,8 @@ fn main() {
     let cookie = conn.send_request_checked(&xcb::x::PutImage {
         drawable: x::Drawable::Pixmap(bg_id),
         gc: gcon_id,
-        width: (src_width/divide_factor) as u16,
-        height: (src_height/divide_factor) as u16,
+        width: (src_width / divide_factor) as u16,
+        height: (src_height / divide_factor) as u16,
         dst_x: 0,
         dst_y: 0,
         left_pad: 0,
@@ -244,8 +267,7 @@ fn main() {
         pid: pic_id,
         drawable: x::Drawable::Pixmap(bg_id),
         format: pict_format,
-        value_list: &[
-        ],
+        value_list: &[],
     });
     let checked = conn.check_request(cookie);
     if checked.is_err() {
@@ -255,7 +277,7 @@ fn main() {
     // set picture transform
     let cookie = conn.send_request_checked(&xcb::render::SetPictureTransform {
         picture: pic_id,
-        transform: xcb::render::Transform{
+        transform: xcb::render::Transform {
             matrix11: transform[0],
             matrix12: transform[1],
             matrix13: transform[2],
@@ -279,8 +301,7 @@ fn main() {
         pid: desktop_pic_id,
         drawable: x::Drawable::Window(desktop_id),
         format: pict_format,
-        value_list: &[
-        ],
+        value_list: &[],
     });
 
     let checked = conn.check_request(cookie);
@@ -289,25 +310,7 @@ fn main() {
     }
 
     // composite picture onto window
-    let cookie = conn.send_request_checked(&xcb::render::Composite {
-        op: xcb::render::PictOp::Over,
-        src: pic_id,
-        mask: xcb::render::Picture::none(),
-        dst: desktop_pic_id,
-        src_x: 0,
-        src_y: 0,
-        mask_x: 0,
-        mask_y: 0,
-        dst_x: 0,
-        dst_y: 0,
-        width: src_width,
-        height: src_height,
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error compositing picture");
-    }
+    redraw_desktop(&conn, pic_id, desktop_pic_id, src_width, src_height);
 
     // map the window
     let cookie = conn.send_request_checked(&xcb::x::MapWindow {
@@ -317,6 +320,24 @@ fn main() {
     let checked = conn.check_request(cookie);
     if checked.is_err() {
         println!("Error mapping window");
+    }
+
+    // grab the mouse
+    let cookie = conn.send_request_checked(&xcb::x::GrabButton {
+        owner_events: true,
+        grab_window: root,
+        event_mask: x::EventMask::BUTTON_PRESS | x::EventMask::BUTTON_RELEASE | x::EventMask::POINTER_MOTION,
+        pointer_mode: x::GrabMode::Async,
+        keyboard_mode: x::GrabMode::Async,
+        confine_to: x::Window::none(),
+        cursor: x::Cursor::none(),
+        button: x::ButtonIndex::Any,
+        modifiers: x::ModMask::empty(),
+    });
+
+    let checked = conn.check_request(cookie);
+    if checked.is_err() {
+        println!("Error grabbing mouse");
     }
 
     conn.flush().expect("flush failed!");
@@ -334,67 +355,134 @@ fn main() {
             if event_success.is_some() {
                 match event_success.unwrap() {
                     xcb::Event::X(x::Event::CreateNotify(ev)) => {
-                        if ev.window() != desktop_id {
-                            conn.send_request(&x::ConfigureWindow {
-                                window: ev.window(),
-                                value_list: &[x::ConfigWindow::BorderWidth(5)],
-                            });
-
-                            conn.flush().expect("flush failed!");
-                        }
-
+                        println!("new window!");
                         // check the parent window to see if it's the root window
-                        if root != ev.parent() {
-                            continue;
+                        if root != ev.parent() || desktop_id == ev.window() {
+                            println!("nevermind, it is root or desktop");
+                        } else {
+                            // check if this is a frame window
+                            let mut found = false;
+                            for w in windows.clone().iter() {
+                                if w.frame_id == ev.window() {
+                                    println!("nevermind, it is a frame");
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if !found {
+
+                                let centre_x = (src_width / 2) - (ev.width() / 2);
+                                let centre_y = (src_height / 2) - (ev.height() / 2);
+
+                                // change the main window to be in the centre of the screen
+                                conn.send_request(&xcb::x::ConfigureWindow {
+                                    window: ev.window(),
+                                    value_list: &[
+                                        x::ConfigWindow::X(centre_x as i32),
+                                        x::ConfigWindow::Y(centre_y as i32),
+                                    ],
+                                });
+
+                                conn.flush().expect("flush failed!");
+
+
+                                // get pixmap for window
+                                let p_id = conn.generate_id();
+                                conn.send_request(&xcb::render::CreatePicture {
+                                    pid: p_id,
+                                    drawable: x::Drawable::Window(ev.window()),
+                                    format: pict_format,
+                                    value_list: &[
+                                        xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
+                                    ],
+                                });
+
+                                // create copy of window bounding region
+                                let r_id = conn.generate_id();
+                                conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
+                                    region: r_id,
+                                    window: ev.window(),
+                                    kind: xcb::shape::Sk::Bounding,
+                                });
+
+                                // translate it
+                                conn.send_request(&xcb::xfixes::TranslateRegion {
+                                    region: r_id,
+                                    dx: -(centre_x as i16),
+                                    dy: -(centre_y as i16),
+                                });
+                                conn.send_request(&xcb::xfixes::SetPictureClipRegion {
+                                    picture: p_id,
+                                    region: r_id,
+                                    x_origin: 0,
+                                    y_origin: 0,
+                                });
+
+                                // create the frame
+                                let frame_id = conn.generate_id();
+                                conn.send_request(&xcb::x::CreateWindow {
+                                    depth: 24,
+                                    wid: frame_id,
+                                    parent: root,
+                                    x: centre_x as i16,
+                                    y: centre_y as i16 - 10,
+                                    width: ev.width() + 20 as u16,
+                                    height: ev.height() + 20 as u16,
+                                    border_width: 5,
+                                    class: x::WindowClass::InputOutput,
+                                    visual: screen.root_visual(),
+                                    value_list: &[
+                                        x::Cw::BackPixel(screen.white_pixel()),
+                                        x::Cw::EventMask(x::EventMask::BUTTON_PRESS | x::EventMask::BUTTON_RELEASE | x::EventMask::EXPOSURE),
+                                    ],
+                                });
+
+                                // map the frame
+                                conn.send_request(&xcb::x::MapWindow {
+                                    window: frame_id,
+                                });
+
+
+                                conn.flush().expect("flush failed!");
+
+                                windows.push(CumWindow {
+                                    window_id: ev.window(),
+                                    frame_id,
+                                    pixmap_id: p_id,
+                                    region_id: r_id,
+                                    x: centre_x as i16,
+                                    y: centre_y as i16,
+                                    width: ev.width(),
+                                    height: ev.height(),
+                                    is_opening: false,
+                                    animation_time: 0,
+                                });
+                                need_redraw = true;
+                            }
                         }
-
-                        // get pixmap for window
-                        let p_id = conn.generate_id();
-                        conn.send_request(&xcb::render::CreatePicture{
-                            pid: p_id,
-                            drawable: x::Drawable::Window(ev.window()),
-                            format: pict_format,
-                            value_list: &[
-                                xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
-                            ],
-                        });
-
-                        // create copy of window bounding region
-                        let r_id = conn.generate_id();
-                        conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
-                            region: r_id,
-                            window: ev.window(),
-                            kind: xcb::shape::Sk::Bounding,
-                        });
-
-                        // translate it
-                        conn.send_request(&xcb::xfixes::TranslateRegion {
-                            region: r_id,
-                            dx: -ev.x(),
-                            dy: -ev.y(),
-                        });
-                        conn.send_request(&xcb::xfixes::SetPictureClipRegion {
-                            picture: p_id,
-                            region: r_id,
-                            x_origin: 0,
-                            y_origin: 0,
-                        });
-
-                        windows.push(CumWindow {
-                            window_id: ev.window(),
-                            pixmap_id: p_id,
-                            region_id: r_id,
-                            x: ev.x(),
-                            y: ev.y(),
-                            width: ev.width(),
-                            height: ev.height(),
-                            is_opening: false,
-                            animation_time: 0
-                        });
-                    },
+                    }
                     xcb::Event::X(x::Event::DestroyNotify(ev)) => {
-                        windows.retain(|w| w.window_id != ev.window());
-                    },
+                        // find the window in the list
+                        let mut found = false;
+                        for w in windows.clone().iter_mut() {
+                            if w.window_id == ev.window() {
+                                found = true;
+                                // destroy the frame
+                                conn.send_request(&xcb::x::DestroyWindow {
+                                    window: w.frame_id,
+                                });
+                                // remove the window
+                                let mut i = 0;
+                                for w in windows.clone().iter() {
+                                    if w.window_id == ev.window() {
+                                        break;
+                                    }
+                                    i += 1;
+                                }
+                                windows.remove(i);
+                            }
+                        }
+                    }
                     xcb::Event::X(x::Event::ConfigureNotify(ev)) => {
                         // check if the window is the root window
                         if ev.window() == root {
@@ -426,10 +514,22 @@ fn main() {
                                     y_origin: 0,
                                 });
 
+                                // update frame window position
+                                conn.send_request(&xcb::x::ConfigureWindow {
+                                    window: w.frame_id,
+                                    value_list: &[
+                                        x::ConfigWindow::X(ev.x() as i32 - 10),
+                                        x::ConfigWindow::Y(ev.y() as i32 - 20),
+                                        x::ConfigWindow::Width(ev.width() as u32 + 20),
+                                        x::ConfigWindow::Height(ev.height() as u32 + 20),
+                                    ],
+                                });
+
                                 w.x = ev.x();
                                 w.y = ev.y();
                                 w.width = ev.width();
                                 w.height = ev.height();
+                                need_redraw = true;
                                 break;
                             }
                         }
@@ -437,7 +537,7 @@ fn main() {
                             // window not found, ignore
                             continue;
                         }
-                    },
+                    }
                     xcb::Event::X(x::Event::Expose(ev)) => {
                         // map window
                         conn.send_request(&x::MapWindow {
@@ -446,29 +546,27 @@ fn main() {
 
                         // if desktop window, copy pixmap to window
                         if ev.window() == desktop_id {
-
-                            let cookie = conn.send_request_checked(&xcb::render::Composite {
-                                op: xcb::render::PictOp::Over,
-                                src: pic_id,
-                                mask: xcb::render::Picture::none(),
-                                dst: desktop_pic_id,
-                                src_x: 0,
-                                src_y: 0,
-                                mask_x: 0,
-                                mask_y: 0,
-                                dst_x: 0,
-                                dst_y: 0,
-                                width: src_width,
-                                height: src_height,
-                            });
-
-                            let checked = conn.check_request(cookie);
-                            if checked.is_err() {
-                                println!("Error compositing picture");
-                            }
+                            redraw_desktop(&conn, pic_id, desktop_pic_id, src_width, src_height);
                         }
                         conn.flush().expect("Error flushing");
-                    },
+                        need_redraw = true;
+                    }
+                    xcb::Event::X(x::Event::ButtonPress(ev)) => {
+                        if ev.detail() == 1 {
+                            // left click
+                            let mut tmp = 0;
+                            if ev.event() == root {
+                                continue;
+                            }
+                            for w in windows.iter_mut() {
+                                if w.window_id == ev.event() {
+                                    println!("{}", tmp);
+                                    break;
+                                }
+                                tmp += 1;
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -489,7 +587,7 @@ fn main() {
             if need_redraw {
                 // get root pixmap
                 let r_id = conn.generate_id();
-                conn.send_request(&xcb::render::CreatePicture{
+                conn.send_request(&xcb::render::CreatePicture {
                     pid: r_id,
                     drawable: x::Drawable::Window(root),
                     format: pict_format,
@@ -498,28 +596,76 @@ fn main() {
                     ],
                 });
 
+                // get desktop pixmap
+                let d_id = conn.generate_id();
+                conn.send_request(&xcb::render::CreatePicture {
+                    pid: d_id,
+                    drawable: x::Drawable::Window(desktop_id),
+                    format: pict_format,
+                    value_list: &[
+                        xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
+                    ],
+                });
+                conn.send_request(&xcb::render::Composite {
+                    op: xcb::render::PictOp::Over,
+                    src: d_id,
+                    mask: xcb::render::Picture::none(),
+                    dst: r_id,
+                    src_x: 0,
+                    src_y: 0,
+                    mask_x: 0,
+                    mask_y: 0,
+                    dst_x: 0,
+                    dst_y: 0,
+                    width: src_width as u16,
+                    height: src_height as u16,
+                });
+
                 // for each window, move it by 1 up and 1 right
                 for w in windows.iter_mut() {
                     // set the window's border color
-                    if desktop_id != w.window_id {
-                        conn.send_request(&x::ChangeWindowAttributes {
-                            window: w.window_id,
-                            value_list: &[
-                                x::Cw::BorderPixel(accent_color as u32),
-                            ]});
+                    conn.send_request(&x::ChangeWindowAttributes {
+                        window: w.frame_id,
+                        value_list: &[
+                            x::Cw::BorderPixel(accent_color as u32),
+                        ],
+                    });
 
-                        conn.flush().expect("Error flushing");
-                    }
-
+                    conn.flush().expect("Error flushing");
                     // get window pixmap
                     let p_id = conn.generate_id();
-                    conn.send_request(&xcb::render::CreatePicture{
+                    conn.send_request(&xcb::render::CreatePicture {
                         pid: p_id,
                         drawable: x::Drawable::Window(w.window_id),
                         format: pict_format,
                         value_list: &[
                             xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
                         ],
+                    });
+                    // get frame pixmap
+                    let f_id = conn.generate_id();
+                    conn.send_request(&xcb::render::CreatePicture {
+                        pid: f_id,
+                        drawable: x::Drawable::Window(w.frame_id),
+                        format: pict_format,
+                        value_list: &[
+                            xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
+                        ],
+                    });
+                    // composite the frame
+                    conn.send_request(&xcb::render::Composite {
+                        op: xcb::render::PictOp::Over,
+                        src: f_id,
+                        mask: xcb::render::Picture::none(),
+                        dst: r_id,
+                        src_x: -5,
+                        src_y: -5,
+                        mask_x: 0,
+                        mask_y: 0,
+                        dst_x: w.x - 10 - 5,
+                        dst_y: w.y - 20 - 5,
+                        width: w.width as u16 + 20 + 10,
+                        height: w.height as u16 + 20 + 10,
                     });
 
                     // composite render pixmap onto window
@@ -529,31 +675,16 @@ fn main() {
                             src: p_id,
                             mask: xcb::render::Picture::none(),
                             dst: r_id,
-                            src_x: -5,
-                            src_y: -5,
+                            src_x: -1,
+                            src_y: -1,
                             mask_x: 0,
                             mask_y: 0,
-                            dst_x: w.x,
-                            dst_y: w.y,
-                            width: w.width as u16 + 10,
-                            height: w.height as u16 + 10,
+                            dst_x: w.x - 1,
+                            dst_y: w.y - 1,
+                            width: w.width as u16 + 2,
+                            height: w.height as u16 + 2,
                         });
-                    } else {
-                        conn.send_request(&xcb::render::Composite {
-                            op: xcb::render::PictOp::Over,
-                            src: p_id,
-                            mask: xcb::render::Picture::none(),
-                            dst: r_id,
-                            src_x: 0,
-                            src_y: 0,
-                            mask_x: 0,
-                            mask_y: 0,
-                            dst_x: w.x,
-                            dst_y: w.y,
-                            width: w.width as u16,
-                            height: w.height as u16,
-                        });
-                    }
+                    } else {}
                 }
                 conn.flush().expect("Error flushing");
                 now = after;
