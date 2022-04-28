@@ -6,4 +6,4 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-smithay = { git = "https://github.com/Smithay/smithay" }
+smithay = { version = "0.3.0", features = ["backend_winit"] }
