@@ -3,6 +3,9 @@ mod helpers;
 
 use std::os::raw::{c_ulong};
 use std::time::SystemTime;
+use resize::Pixel::RGBA8;
+use resize::px::RGBA;
+use resize::Type::Lanczos3;
 use stb_image::image::LoadResult;
 use xcb::{composite, glx, x, Xid};
 use crate::types::CumWindow;
@@ -151,6 +154,38 @@ fn main() {
         LoadResult::Error(e) => panic!("Error loading bg.png: {}", e),
     };
 
+    let mut src = vec![RGBA::new(0,0,0,0); bg_image.width as usize * bg_image.height as usize];
+
+    // copy the image data into the src vector
+    let mut i = 0;
+    while i < bg_image.data.len() {
+        let r = bg_image.data[i];
+        let g = bg_image.data[i + 1];
+        let b = bg_image.data[i + 2];
+        let a = bg_image.data[i + 3];
+        src[i / 4] = RGBA::new(r, g, b, a);
+        i += 4;
+    }
+
+    let mut dst = vec![RGBA::new(0,0,0,0); src_width as usize * src_height as usize];
+    let mut resizer = resize::new(bg_image.width, bg_image.height, src_width as usize, src_height as usize, RGBA8, Lanczos3);
+    // is resizer ok?
+    if resizer.is_ok() {
+        resizer.expect("resizer failed to unwrap").resize(&src, &mut dst);
+    } else {
+        println!("Error resizing bg.png");
+    }
+
+    let mut bg_image_data = vec![0; dst.len() * 4];
+    let mut i = 0;
+    while i < dst.len() {
+        bg_image_data.push(dst[i].r);
+        bg_image_data.push(dst[i].g);
+        bg_image_data.push(dst[i].b);
+        bg_image_data.push(255);
+        i += 4;
+    }
+
     // create a pixmap to draw on
     let bg_id = conn.generate_id();
     let cookie = conn.send_request_checked(&xcb::x::CreatePixmap {
@@ -178,38 +213,13 @@ fn main() {
         left_pad: 0,
         depth: 24,
         format: x::ImageFormat::ZPixmap,
-        data: &rgba_to_bgra(&bg_image.data),
+        data: &rgba_to_bgra(&bg_image_data),
     });
 
     let checked = conn.check_request(cookie);
     if checked.is_err() {
         println!("Error putting image on pixmap");
     }
-
-    // calculate scaling required to stretch the image to the window size
-    let mut aspect_ratio = src_width as f32 / src_height as f32;
-
-    let scale_x = 1.0;
-    let mut scale_y = src_width as f32 / bg_image.width as f32;
-
-    // round up scales to the nearest integer
-    if scale_y.fract() > 0.5 {
-        scale_y += 1.0;
-    }
-    if aspect_ratio.fract() > 0.5 {
-        aspect_ratio += 1.0;
-    }
-
-    println!("{}x{}", src_width, src_height);
-    println!("{}", aspect_ratio);
-    println!("{}x{}", scale_x, scale_y);
-
-
-    let transform = [
-        scale_x as i32, 0, 0,
-        0, scale_y as i32, 0,
-        0, 0, aspect_ratio as i32,
-    ];
 
     // create picture from pixmap
     let pic_id = conn.generate_id();
@@ -224,27 +234,6 @@ fn main() {
     let checked = conn.check_request(cookie);
     if checked.is_err() {
         println!("Error creating picture");
-    }
-
-    // set picture transform
-    let cookie = conn.send_request_checked(&xcb::render::SetPictureTransform {
-        picture: pic_id,
-        transform: xcb::render::Transform{
-            matrix11: transform[0],
-            matrix12: transform[1],
-            matrix13: transform[2],
-            matrix21: transform[3],
-            matrix22: transform[4],
-            matrix23: transform[5],
-            matrix31: transform[6],
-            matrix32: transform[7],
-            matrix33: transform[8],
-        },
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error setting picture transform");
     }
 
     // get picture of window
