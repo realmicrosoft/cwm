@@ -9,6 +9,7 @@ use smithay::backend::drm::DrmDevice;
 use smithay::backend::input::{InputBackend, InputEvent};
 use smithay::backend::udev::UdevBackend;
 use smithay::backend::winit::init;
+use smithay::desktop::Space;
 use smithay::reexports;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction};
 use smithay::reexports::calloop::generic::Generic;
@@ -17,7 +18,7 @@ use smithay::reexports::wayland_server::Display;
 
 mod types;
 mod helpers;
-
+mod winit;
 
 
 /*
@@ -38,15 +39,22 @@ impl AsRawFd for FdWrapper {
     }
 }
 
-struct CumBackend {
+pub struct CumBackend {
     winit_backend: Option<smithay::backend::winit::WinitGraphicsBackend>,
     winit_input_backend: Option<smithay::backend::winit::WinitInputBackend>,
 }
 
-struct Cum {
+pub struct Cum {
     display: Rc<RefCell<Display>>,
     event_loop: LoopHandle<'static, Cum>,
     backend: CumBackend,
+    space: Rc<RefCell<Space>>,
+}
+
+impl Cum {
+    pub fn process_input_event_windowed<B: InputBackend>(&mut self, event: InputEvent<B>, output_name: &str) {
+        println!("keyboard event!");
+    }
 }
 
 fn main() {
