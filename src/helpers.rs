@@ -13,4 +13,36 @@ pub fn rgba_to_bgra(rgba_array: &[u8]) -> Vec<u8> {
         i += 4;
     }
     new_array
+
+
+}
+
+use xcb::Connection;
+
+pub fn allow_input_passthrough(&conn: &Connection, window: xcb::x::Window, p_id: xcb::render::Picture,x: i16, y: i16) -> xcb::xfixes::Region {
+    // create copy of window bounding region
+    let r_id = conn.generate_id();
+    conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
+        region: r_id,
+        window,
+        kind: xcb::shape::Sk::Bounding,
+    });
+    // translate it
+    conn.send_request(&xcb::xfixes::TranslateRegion {
+        region: r_id,
+        dx: -x,
+        dy: -y,
+    });
+    conn.send_request(&xcb::xfixes::SetPictureClipRegion {
+        picture: p_id,
+        region: r_id,
+        x_origin: 0,
+        y_origin: 0,
+    });
+    // delete the region
+    conn.send_request(&xcb::xfixes::DestroyRegion {
+        region: r_id,
+    });
+
+    r_id
 }

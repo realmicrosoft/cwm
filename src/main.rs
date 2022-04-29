@@ -1,5 +1,6 @@
 mod types;
 mod helpers;
+mod linkedlist;
 
 use std::num::NonZeroU32;
 use std::os::raw::{c_ulong};
@@ -454,25 +455,6 @@ fn main() {
                                         xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
                                     ],
                                 });
-                                // create copy of window bounding region
-                                let r_id = conn.generate_id();
-                                conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
-                                    region: r_id,
-                                    window: ev.window(),
-                                    kind: xcb::shape::Sk::Bounding,
-                                });
-                                // translate it
-                                conn.send_request(&xcb::xfixes::TranslateRegion {
-                                    region: r_id,
-                                    dx: -(centre_x as i16),
-                                    dy: -(centre_y as i16),
-                                });
-                                conn.send_request(&xcb::xfixes::SetPictureClipRegion {
-                                    picture: p_id,
-                                    region: r_id,
-                                    x_origin: 0,
-                                    y_origin: 0,
-                                });
                                 // create the frame
                                 let frame_id = conn.generate_id();
                                 conn.send_request(&xcb::x::CreateWindow {
@@ -562,6 +544,10 @@ fn main() {
                                     region: w.region_id,
                                     x_origin: 0,
                                     y_origin: 0,
+                                });
+                                // destroy the region
+                                conn.send_request(&xcb::xfixes::DestroyRegion {
+                                    region: w.region_id,
                                 });
                                 // update frame window position
                                 conn.send_request(&xcb::x::ConfigureWindow {
