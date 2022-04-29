@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use smithay::backend::drm;
 use smithay::backend::drm::DrmDevice;
 use smithay::backend::input::{InputBackend, InputEvent};
+use smithay::backend::session::auto::AutoSession;
 use smithay::backend::udev::UdevBackend;
 use smithay::backend::winit::init;
 use smithay::desktop::Space;
@@ -15,12 +16,17 @@ use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAct
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::udev::Udev;
 use smithay::reexports::wayland_server::Display;
+use smithay::utils::{Logical, Point};
+use smithay::wayland::seat::CursorImageStatus;
+use crate::drmb::UdevData;
 
 mod types;
 mod helpers;
 mod winit;
 mod render;
 mod drawing;
+mod drmb;
+mod cursor;
 
 
 /*
@@ -42,19 +48,45 @@ impl AsRawFd for FdWrapper {
 }
 
 pub struct CumBackend {
-    winit_backend: Option<smithay::backend::winit::WinitGraphicsBackend>,
+    winit_backend: Option<winit::WinitData>,
+    udev_backend: Option<Rc<RefCell<UdevData>>>,
+    seat_name: Option<String>,
 }
 
 pub struct Cum {
     display: Rc<RefCell<Display>>,
     event_loop: LoopHandle<'static, Cum>,
     space: Rc<RefCell<Space>>,
-    data: Option<winit::WinitData>,
+    data: CumBackend,
+    start_time: std::time::Instant,
+    pointer_location: Point<f64, Logical>,
+    cursor_status: Mutex<CursorImageStatus>,
 }
 
 impl Cum {
     pub fn process_input_event_windowed<B: InputBackend>(&mut self, event: InputEvent<B>, output_name: &str) {
         println!("keyboard event!");
+    }
+}
+
+impl Clone for Cum {
+    fn clone(&self) -> Self {
+        // gotta do some special stuff for data and cursor_status
+        let new_cursor_status = self.cursor_status.lock().unwrap().clone();
+        let new_data = CumBackend{
+            winit_backend: self.data.winit_backend.clone(),
+            udev_backend: self.data.udev_backend.clone(),
+            seat_name: self.data.seat_name.clone(),
+        };
+        Cum {
+            display: self.display.clone(),
+            event_loop: self.event_loop.clone(),
+            space: self.space.clone(),
+            data: new_data,
+            start_time: self.start_time.clone(),
+            pointer_location: self.pointer_location.clone(),
+            cursor_status: Mutex::new(new_cursor_status),
+        }
     }
 }
 

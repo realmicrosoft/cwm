@@ -1,5 +1,6 @@
 use std::{cell::RefCell, rc::Rc, sync::atomic::Ordering, time::Duration};
 use std::borrow::Borrow;
+use std::sync::Mutex;
 
 use slog::Logger;
 use smithay::{
@@ -27,6 +28,7 @@ use smithay::{
 };
 use smithay::backend::winit::WinitGraphicsBackend;
 use smithay::desktop::Space;
+use smithay::utils::Point;
 
 use crate::{
     drawing::*,
@@ -36,6 +38,7 @@ use crate::{
 
 pub const OUTPUT_NAME: &str = "winit";
 
+#[derive(Clone)]
 pub struct WinitData {
     full_redraw: u8,
 }
@@ -93,7 +96,14 @@ pub fn run_winit() {
         display: display.clone(),
         event_loop: event_loop.handle(),
         space: Rc::new(RefCell::new(Space::new(None))),
-        data: Some(data),
+        data: CumBackend{
+            winit_backend: Some(data),
+            udev_backend: None,
+            seat_name: None,
+        },
+        start_time: std::time::Instant::now(),
+        pointer_location: Point::from((0.0, 0.0)),
+        cursor_status: Mutex::new(CursorImageStatus::Default),
     };
 
     let mode = Mode {
@@ -106,7 +116,7 @@ pub fn run_winit() {
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: wl_output::Subpixel::Unknown,
-            make: "Smithay".into(),
+            make: "CHAOTIC WINDOW MANAGER".into(),
             model: "Winit".into(),
         },
         None,
@@ -155,10 +165,10 @@ pub fn run_winit() {
         // drawing logic
         {
             let mut backend = backend.borrow_mut();
-            let cursor_visible: bool = false;
+            let mut cursor_visible: bool = false;
 
             let mut elements = Vec::<CustomElem<Gles2Renderer>>::new();
-            //let mut cursor_guard = state.cursor_status.lock().unwrap();
+            let mut cursor_guard = state.cursor_status.lock().unwrap();
 /*
             // draw the dnd icon if any
             if let Some(ref surface) = *dnd_guard {
@@ -168,6 +178,8 @@ pub fn run_winit() {
                     );
                 }
             }
+
+ */
 
             // draw the cursor as relevant
             // reset the cursor if the surface is no longer alive
@@ -181,13 +193,11 @@ pub fn run_winit() {
             if let CursorImageStatus::Image(ref surface) = *cursor_guard {
                 cursor_visible = false;
                 elements
-                    .push(draw_cursor(surface.clone(), state.pointer_location.to_i32_round(), &log).into());
+                    .push(draw_cursor(surface.clone(), state.pointer_location.to_i32_round()).into());
             } else {
                 cursor_visible = true;
             }
-
- */
-            let full_redraw = &mut (state.data.as_mut()).unwrap().full_redraw;
+            let full_redraw = &mut (state.data.winit_backend.as_mut()).unwrap().full_redraw;
             *full_redraw = full_redraw.saturating_sub(1);
             let age = if *full_redraw > 0 {
                 0
