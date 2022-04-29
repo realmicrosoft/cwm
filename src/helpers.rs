@@ -18,6 +18,7 @@ pub fn rgba_to_bgra(rgba_array: &[u8]) -> Vec<u8> {
 }
 
 use xcb::Connection;
+use xcb::{Xid};
 
 pub fn allow_input_passthrough(&conn: &Connection, window: xcb::x::Window, p_id: xcb::render::Picture,x: i16, y: i16) -> xcb::xfixes::Region {
     // create copy of window bounding region
@@ -45,4 +46,17 @@ pub fn allow_input_passthrough(&conn: &Connection, window: xcb::x::Window, p_id:
     });
 
     r_id
+}
+
+pub fn glx_pixmap_from_x(conn: &Connection, x_pixmap: xcb::x::Pixmap, screen_num: u32) -> xcb::glx::Pixmap {
+    let glx_pixmap = conn.generate_id();
+    conn.send_request(&xcb::glx::CreatePixmap {
+        screen: screen_num,
+        fbconfig: xcb::glx::Fbconfig::none(),
+        pixmap: x_pixmap,
+        glx_pixmap,
+        num_attribs: 0,
+        attribs: &[],
+    });
+    glx_pixmap
 }

@@ -9,7 +9,7 @@ use stb_image::image::LoadResult;
 use fast_image_resize as fr;
 use xcb::{composite, Connection, glx, x, Xid};
 use crate::types::CumWindow;
-use crate::helpers::{allow_input_passthrough, rgba_to_bgra};
+use crate::helpers::{allow_input_passthrough, glx_pixmap_from_x, rgba_to_bgra};
 
 /*
 unsafe extern "C" fn error_handler(display: *mut Display, error_event: *mut XErrorEvent) -> c_int {
@@ -204,12 +204,31 @@ fn main() {
 
     // create glx context
     let ctx = conn.generate_id();
-    let cookie = conn.send_request(&xcb::glx::CreateContext{
+    conn.send_request(&xcb::glx::CreateContext{
         context: ctx,
         visual: screen.root_visual(),
         screen: screen_num as u32,
         share_list : xcb::glx::Context::none(),
-        is_direct: true,
+        is_direct: false,
+    });
+
+    // create the glx window
+    let stage = conn.generate_id();
+    conn.send_request(&xcb::glx::CreateWindow{
+        screen: screen_num as u32,
+        fbconfig: xcb::glx::Fbconfig::none(),
+        window: overlay_window,
+        glx_window: stage,
+        num_attribs: 0,
+        attribs: &[],
+    });
+
+    // make current
+    let ctx_tag = 0u32;
+    conn.send_request(&xcb::glx::MakeCurrent{
+        drawable: xcb::glx::Drawable::Window(stage),
+        context: ctx,
+        old_context_tag: ctx_tag,
     });
 
     // create new window for desktop
@@ -480,16 +499,16 @@ fn main() {
                                     ],
                                 });
                                 conn.flush().expect("flush failed!");
-                                // get pixmap for window
-                                let p_id = conn.generate_id();
-                                conn.send_request(&xcb::render::CreatePicture {
-                                    pid: p_id,
+                                // get pixmap from the window
+                                let pixmap = conn.generate_id();
+                                conn.send_request(&xcb::x::CreatePixmap {
+                                    depth: 24,
+                                    pid: pixmap,
                                     drawable: x::Drawable::Window(ev.window()),
-                                    format: pict_format,
-                                    value_list: &[
-                                        xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
-                                    ],
+                                    width: ev.width(),
+                                    height: ev.height(),
                                 });
+                                let glx_pixmap = glx_pixmap_from_x(&conn, pixmap, screen_num as u32);
                                 // create the frame
                                 let frame_id = conn.generate_id();
                                 conn.send_request(&xcb::x::CreateWindow {
@@ -516,8 +535,7 @@ fn main() {
                                 windows.push(CumWindow {
                                     window_id: ev.window(),
                                     frame_id,
-                                    pixmap_id: p_id,
-                                    region_id: r_id,
+                                    pixmap_id: glx_pixmap,
                                     x: centre_x as i16,
                                     y: centre_y as i16,
                                     width: ev.width(),
@@ -562,28 +580,6 @@ fn main() {
                         for w in windows.iter_mut() {
                             if w.window_id == ev.window() {
                                 found = true;
-                                // update bounding region
-                                conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
-                                    region: w.region_id,
-                                    window: ev.window(),
-                                    kind: xcb::shape::Sk::Bounding,
-                                });
-                                // translate it
-                                conn.send_request(&xcb::xfixes::TranslateRegion {
-                                    region: w.region_id,
-                                    dx: -ev.x(),
-                                    dy: -ev.y(),
-                                });
-                                conn.send_request(&xcb::xfixes::SetPictureClipRegion {
-                                    picture: w.pixmap_id,
-                                    region: w.region_id,
-                                    x_origin: 0,
-                                    y_origin: 0,
-                                });
-                                // destroy the region
-                                conn.send_request(&xcb::xfixes::DestroyRegion {
-                                    region: w.region_id,
-                                });
                                 // update frame window position
                                 conn.send_request(&xcb::x::ConfigureWindow {
                                     window: w.frame_id,
@@ -661,29 +657,19 @@ fn main() {
                 conn.flush().expect("Error flushing");
 
                 // get desktop pixmap
-                let d_id = conn.generate_id();
-                conn.send_request(&xcb::render::CreatePicture {
-                    pid: d_id,
+                // get pixmap from the window
+                let pixmap = conn.generate_id();
+                conn.send_request(&xcb::x::CreatePixmap {
+                    depth: 24,
+                    pid: pixmap,
                     drawable: x::Drawable::Window(desktop_id),
-                    format: pict_format,
-                    value_list: &[
-                        xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
-                    ],
+                    width: src_width,
+                    height: src_height,
                 });
-                conn.send_request(&xcb::render::Composite {
-                    op: xcb::render::PictOp::Over,
-                    src: d_id,
-                    mask: xcb::render::Picture::none(),
-                    dst: r_id,
-                    src_x: 0,
-                    src_y: 0,
-                    mask_x: 0,
-                    mask_y: 0,
-                    dst_x: 0,
-                    dst_y: 0,
-                    width: src_width as u16,
-                    height: src_height as u16,
-                });
+                let d_id = glx_pixmap_from_x(&conn, pixmap, screen_num as u32);
+
+                // draw the desktop
+
 
                 // for each window, move it by 1 up and 1 right
                 for w in windows.iter_mut() {

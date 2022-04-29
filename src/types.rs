@@ -7,8 +7,7 @@ pub struct CumWindow {
     pub height: u16,
     pub window_id: xcb::x::Window,
     pub frame_id: xcb::x::Window,
-    pub pixmap_id: xcb::render::Picture,
-    pub region_id: xcb::xfixes::Region,
+    pub pixmap_id: xcb::glx::Pixmap,
     pub is_opening: bool,
     pub animation_time: i32,
 }
