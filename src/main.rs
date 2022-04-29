@@ -11,13 +11,6 @@ use xcb::{composite, Connection, glx, x, Xid};
 use crate::types::CumWindow;
 use crate::helpers::{allow_input_passthrough, glx_pixmap_from_x, rgba_to_bgra};
 
-/*
-unsafe extern "C" fn error_handler(display: *mut Display, error_event: *mut XErrorEvent) -> c_int {
-    unsafe { println!("X Error: {}", (*error_event).error_code); }
-    0
-}
- */
-
 fn redraw_desktop(conn: &Connection, pic_id: xcb::render::Picture, desktop_pic_id: xcb::render::Picture, src_width: u16, src_height: u16) {
     let cookie = conn.send_request_checked(&xcb::render::Composite {
         op: xcb::render::PictOp::Over,
