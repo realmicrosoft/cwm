@@ -19,6 +19,8 @@ use smithay::reexports::wayland_server::Display;
 mod types;
 mod helpers;
 mod winit;
+mod render;
+mod drawing;
 
 
 /*
@@ -41,14 +43,13 @@ impl AsRawFd for FdWrapper {
 
 pub struct CumBackend {
     winit_backend: Option<smithay::backend::winit::WinitGraphicsBackend>,
-    winit_input_backend: Option<smithay::backend::winit::WinitInputBackend>,
 }
 
 pub struct Cum {
     display: Rc<RefCell<Display>>,
     event_loop: LoopHandle<'static, Cum>,
-    backend: CumBackend,
     space: Rc<RefCell<Space>>,
+    data: Option<winit::WinitData>,
 }
 
 impl Cum {
@@ -58,7 +59,9 @@ impl Cum {
 }
 
 fn main() {
-    let mut event_loop: EventLoop<Cum> = EventLoop::try_new().expect("cant create event loop ):");
+    winit::run_winit();
+}
+    /*let mut event_loop: EventLoop<Cum> = EventLoop::try_new().expect("cant create event loop ):");
     let handle = event_loop.handle();
 
     let mut display = Display::new();
@@ -98,3 +101,5 @@ fn main() {
         },
     ).expect("cant run event loop");
 }
+
+     */
