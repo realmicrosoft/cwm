@@ -9,7 +9,7 @@ use stb_image::image::LoadResult;
 use fast_image_resize as fr;
 use xcb::{composite, Connection, glx, x, Xid};
 use crate::types::CumWindow;
-use crate::helpers::rgba_to_bgra;
+use crate::helpers::{allow_input_passthrough, rgba_to_bgra};
 
 /*
 unsafe extern "C" fn error_handler(display: *mut Display, error_event: *mut XErrorEvent) -> c_int {
@@ -173,9 +173,44 @@ fn main() {
     if reply.is_err() {
         println!("Error enabling bigreq extension");
     }
-
     // check maximum request size
     println!("Maximum request size: {}", reply.unwrap().maximum_request_length());
+
+    // get overlay window
+    let cookie = conn.send_request(&xcb::composite::GetOverlayWindow {
+        window: root,
+    });
+
+    let reply = conn.wait_for_reply(cookie);
+    if reply.is_err() {
+        println!("Error getting overlay window");
+    }
+
+    let overlay_window = reply.unwrap().overlay_win();
+
+    // get overlay picture
+    let r_id = conn.generate_id();
+    conn.send_request(&xcb::render::CreatePicture {
+        pid: r_id,
+        drawable: x::Drawable::Window(overlay_window),
+        format: pict_format,
+        value_list: &[
+            xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
+        ],
+    });
+
+    // allow input passthrough
+    allow_input_passthrough(&conn, overlay_window, r_id, 0, 0);
+
+    // create glx context
+    let ctx = conn.generate_id();
+    let cookie = conn.send_request(&xcb::glx::CreateContext{
+        context: ctx,
+        visual: screen.root_visual(),
+        screen: screen_num as u32,
+        share_list : xcb::glx::Context::none(),
+        is_direct: true,
+    });
 
     // create new window for desktop
     let desktop_id = conn.generate_id();
@@ -624,16 +659,6 @@ fn main() {
 
             if need_redraw {
                 conn.flush().expect("Error flushing");
-                // get root pixmap
-                let r_id = conn.generate_id();
-                conn.send_request(&xcb::render::CreatePicture {
-                    pid: r_id,
-                    drawable: x::Drawable::Window(root),
-                    format: pict_format,
-                    value_list: &[
-                        xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
-                    ],
-                });
 
                 // get desktop pixmap
                 let d_id = conn.generate_id();

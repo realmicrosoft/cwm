@@ -1,7 +1,5 @@
 // about to make a ton of rust programmers upset (:
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use crate::types;
 
 struct Element {
