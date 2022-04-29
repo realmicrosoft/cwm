@@ -1,8 +1,11 @@
 use std::{cell::RefCell, rc::Rc, sync::atomic::Ordering, time::Duration};
-use std::borrow::Borrow;
-use std::sync::Mutex;
 
+#[cfg(feature = "debug")]
+use image::GenericImageView;
 use slog::Logger;
+#[cfg(feature = "debug")]
+use smithay::backend::renderer::{gles2::Gles2Texture, ImportMem};
+
 use smithay::{
     backend::renderer::{ImportDma, ImportEgl},
     wayland::dmabuf::init_dmabuf_global,
@@ -26,42 +29,53 @@ use smithay::{
         seat::CursorImageStatus,
     },
 };
-use smithay::backend::winit::WinitGraphicsBackend;
-use smithay::desktop::Space;
-use smithay::utils::Point;
 
 use crate::{
     drawing::*,
-    Cum,
-    CumBackend
+    state::{AnvilState, Backend},
 };
 
 pub const OUTPUT_NAME: &str = "winit";
 
-#[derive(Clone)]
 pub struct WinitData {
+    #[cfg(feature = "debug")]
+    fps_texture: Gles2Texture,
+    #[cfg(feature = "debug")]
+    pub fps: fps_ticker::Fps,
     full_redraw: u8,
 }
 
-pub fn run_winit() {
+impl Backend for WinitData {
+    fn seat_name(&self) -> String {
+        String::from("winit")
+    }
+    fn reset_buffers(&mut self, _output: &Output) {
+        self.full_redraw = 4;
+    }
+    fn early_import(&mut self, _surface: &wl_surface::WlSurface) {}
+}
+
+pub fn run_winit(log: Logger) {
     let mut event_loop = EventLoop::try_new().unwrap();
     let display = Rc::new(RefCell::new(Display::new()));
 
-    let (backend, mut winit) = match winit::init(None) {
+    let (backend, mut winit) = match winit::init(log.clone()) {
         Ok(ret) => ret,
         Err(err) => {
-            println!("Failed to initialize Winit backend: {:?}", err);
+            slog::crit!(log, "Failed to initialize Winit backend: {}", err);
             return;
         }
     };
-    let mut backend = Rc::new(RefCell::new(backend));
+    let backend = Rc::new(RefCell::new(backend));
 
-    if (backend.clone().borrow_mut())
+
+    if backend
+        .borrow_mut()
         .renderer()
-        .bind_wl_display(&display.borrow_mut())
+        .bind_wl_display(&display.borrow())
         .is_ok()
     {
-        println!("EGL hardware-acceleration enabled");
+        info!(log, "EGL hardware-acceleration enabled");
         let dmabuf_formats = backend
             .borrow_mut()
             .renderer()
@@ -79,32 +93,37 @@ pub fn run_winit() {
                     .import_dmabuf(buffer, None)
                     .is_ok()
             },
-            None,
+            log.clone(),
         );
     };
 
-    let size = backend.borrow_mut().window_size().physical_size;
+    let size = backend.borrow().window_size().physical_size;
 
     /*
      * Initialize the globals
      */
 
+    #[cfg(feature = "debug")]
+    let fps_image =
+        image::io::Reader::with_format(std::io::Cursor::new(FPS_NUMBERS_PNG), image::ImageFormat::Png)
+            .decode()
+            .unwrap();
     let data = WinitData {
+        #[cfg(feature = "debug")]
+        fps_texture: backend
+            .borrow_mut()
+            .renderer()
+            .import_memory(
+                &fps_image.to_rgba8(),
+                (fps_image.width() as i32, fps_image.height() as i32).into(),
+                false,
+            )
+            .expect("Unable to upload FPS texture"),
+        #[cfg(feature = "debug")]
+        fps: fps_ticker::Fps::default(),
         full_redraw: 0,
     };
-    let mut state = Cum{
-        display: display.clone(),
-        event_loop: event_loop.handle(),
-        space: Rc::new(RefCell::new(Space::new(None))),
-        data: CumBackend{
-            winit_backend: Some(data),
-            udev_backend: None,
-            seat_name: None,
-        },
-        start_time: std::time::Instant::now(),
-        pointer_location: Point::from((0.0, 0.0)),
-        cursor_status: Mutex::new(CursorImageStatus::Default),
-    };
+    let mut state = AnvilState::init(display.clone(), event_loop.handle(), data, log.clone(), true);
 
     let mode = Mode {
         size,
@@ -116,10 +135,10 @@ pub fn run_winit() {
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: wl_output::Subpixel::Unknown,
-            make: "CHAOTIC WINDOW MANAGER".into(),
+            make: "Smithay".into(),
             model: "Winit".into(),
         },
-        None,
+        log.clone(),
     );
     let _global = output.create_global(&mut *display.borrow_mut());
     output.change_current_state(
@@ -133,9 +152,12 @@ pub fn run_winit() {
 
     let start_time = std::time::Instant::now();
 
-    println!("Initialization completed, starting the main loop.");
 
-    loop {
+    state.start_xwayland();
+
+    info!(log, "Initialization completed, starting the main loop.");
+
+    while state.running.load(Ordering::SeqCst) {
         if winit
             .dispatch_new_events(|event| match event {
                 WinitEvent::Resized { size, .. } => {
@@ -149,7 +171,7 @@ pub fn run_winit() {
                     };
                     output.change_current_state(Some(mode), None, None, None);
                     output.set_preferred(mode);
-                    crate::helpers::fixup_positions(&mut *space);
+                    crate::shell::fixup_positions(&mut *space);
                 }
 
                 WinitEvent::Input(event) => state.process_input_event_windowed(event, OUTPUT_NAME),
@@ -158,18 +180,19 @@ pub fn run_winit() {
             })
             .is_err()
         {
-            //state.running.store(false, Ordering::SeqCst);
+            state.running.store(false, Ordering::SeqCst);
             break;
         }
 
         // drawing logic
         {
             let mut backend = backend.borrow_mut();
-            let mut cursor_visible: bool = false;
+            let cursor_visible: bool;
 
             let mut elements = Vec::<CustomElem<Gles2Renderer>>::new();
+            let dnd_guard = state.dnd_icon.lock().unwrap();
             let mut cursor_guard = state.cursor_status.lock().unwrap();
-/*
+
             // draw the dnd icon if any
             if let Some(ref surface) = *dnd_guard {
                 if surface.as_ref().is_alive() {
@@ -178,8 +201,6 @@ pub fn run_winit() {
                     );
                 }
             }
-
- */
 
             // draw the cursor as relevant
             // reset the cursor if the surface is no longer alive
@@ -193,11 +214,20 @@ pub fn run_winit() {
             if let CursorImageStatus::Image(ref surface) = *cursor_guard {
                 cursor_visible = false;
                 elements
-                    .push(draw_cursor(surface.clone(), state.pointer_location.to_i32_round()).into());
+                    .push(draw_cursor(surface.clone(), state.pointer_location.to_i32_round(), &log).into());
             } else {
                 cursor_visible = true;
             }
-            let full_redraw = &mut (state.data.winit_backend.as_mut()).unwrap().full_redraw;
+
+            // draw FPS
+            #[cfg(feature = "debug")]
+            {
+                let fps = state.backend_data.fps.avg().round() as u32;
+                let fps_texture = &state.backend_data.fps_texture;
+                elements.push(draw_fps::<Gles2Renderer>(fps_texture, fps).into());
+            }
+
+            let full_redraw = &mut state.backend_data.full_redraw;
             *full_redraw = full_redraw.saturating_sub(1);
             let age = if *full_redraw > 0 {
                 0
@@ -212,45 +242,49 @@ pub fn run_winit() {
                     renderer,
                     age,
                     &*elements,
+                    &log,
                 )
-                    .map_err(|err| match err {
-                        RenderError::Rendering(err) => err.into(),
-                        _ => unreachable!(),
-                    })
+                .map_err(|err| match err {
+                    RenderError::Rendering(err) => err.into(),
+                    _ => unreachable!(),
+                })
             });
 
             match render_res {
                 Ok(Some(damage)) => {
                     let scale = output.current_scale().fractional_scale();
                     if let Err(err) = backend.submit(if age == 0 { None } else { Some(&*damage) }, scale) {
-                        println!("Failed to submit buffer: {:?}", err);
+                        warn!(log, "Failed to submit buffer: {}", err);
                     }
-                    //backend.window().set_cursor_visible(cursor_visible);
+                    backend.window().set_cursor_visible(cursor_visible);
                 }
                 Ok(None) => backend.window().set_cursor_visible(cursor_visible),
                 Err(SwapBuffersError::ContextLost(err)) => {
-                    println!("Critical Rendering Error: {}", err);
-                    //state.running.store(false, Ordering::SeqCst);
+                    error!(log, "Critical Rendering Error: {}", err);
+                    state.running.store(false, Ordering::SeqCst);
                 }
-                Err(err) => println!("Rendering error: {:?}", err),
+                Err(err) => warn!(log, "Rendering error: {}", err),
             }
         }
 
         // Send frame events so that client start drawing their next frame
         state
             .space
-            .borrow_mut()
+            .borrow()
             .send_frames(start_time.elapsed().as_millis() as u32);
 
         if event_loop
             .dispatch(Some(Duration::from_millis(16)), &mut state)
             .is_err()
         {
-            //state.running.store(false, Ordering::SeqCst);
+            state.running.store(false, Ordering::SeqCst);
         } else {
             state.space.borrow_mut().refresh();
-            //state.popups.borrow_mut().cleanup();
+            state.popups.borrow_mut().cleanup();
             display.borrow_mut().flush_clients(&mut state);
         }
+
+        #[cfg(feature = "debug")]
+        state.backend_data.fps.tick();
     }
 }

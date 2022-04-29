@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-use std::ptr::null_mut;
-use slog::Logger;
 use smithay::{
     backend::renderer::{Frame, ImportAll, Renderer},
     desktop::{
@@ -10,26 +7,8 @@ use smithay::{
     utils::{Logical, Rectangle},
     wayland::output::Output,
 };
-use smithay::desktop::Window;
 
-#[derive(Default)]
-pub struct FullscreenSurface(RefCell<Option<Window>>);
-
-impl FullscreenSurface {
-    pub fn set(&self, window: Window) {
-        *self.0.borrow_mut() = Some(window);
-    }
-
-    pub fn get(&self) -> Option<Window> {
-        self.0.borrow().clone()
-    }
-
-    pub fn clear(&self) -> Option<Window> {
-        self.0.borrow_mut().take()
-    }
-}
-
-use crate::{drawing::*};
+use crate::{drawing::*, shell::FullscreenSurface};
 
 pub fn render_output<R, E>(
     output: &Output,
@@ -37,11 +16,12 @@ pub fn render_output<R, E>(
     renderer: &mut R,
     age: usize,
     elements: &[E],
+    log: &slog::Logger,
 ) -> Result<Option<Vec<Rectangle<i32, Logical>>>, RenderError<R>>
-    where
-        R: Renderer + ImportAll,
-        R::TextureId: 'static,
-        E: RenderElement<R>,
+where
+    R: Renderer + ImportAll,
+    R::TextureId: 'static,
+    E: RenderElement<R>,
 {
     if let Some(window) = output
         .user_data()
@@ -61,7 +41,6 @@ pub fn render_output<R, E>(
                     CLEAR_COLOR,
                     &[Rectangle::from_loc_and_size((0, 0), mode.size).to_f64()],
                 )?;
-                let dummy_logger = slog::Logger::root(slog::Discard, slog::o!());
                 draw_window(
                     renderer,
                     frame,
@@ -72,7 +51,7 @@ pub fn render_output<R, E>(
                         (0, 0),
                         mode.size.to_f64().to_logical(scale).to_i32_round(),
                     )],
-                    &dummy_logger,
+                    log,
                 )?;
                 for elem in elements {
                     let geo = elem.geometry();
@@ -84,7 +63,7 @@ pub fn render_output<R, E>(
                         scale,
                         location,
                         &[Rectangle::from_loc_and_size((0, 0), geo.size)],
-                        &dummy_logger,
+                        log,
                     )?;
                     damage.extend(elem_damage.into_iter().map(|mut rect| {
                         rect.loc += geo.loc;

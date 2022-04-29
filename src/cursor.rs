@@ -5,7 +5,7 @@ use xcursor::{
     CursorTheme,
 };
 
-static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../cursors/cursor.rgba");
+static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../resources/cursor.rgba");
 
 pub struct Cursor {
     icons: Vec<Image>,
@@ -24,7 +24,7 @@ impl Cursor {
 
         let theme = CursorTheme::load(&name);
         let icons = load_icon(&theme)
-            .map_err(|err| println!("Unable to load xcursor: {:?}, using fallback cursor", err))
+            .map_err(|err| slog::warn!(log, "Unable to load xcursor: {}, using fallback cursor", err))
             .unwrap_or_else(|_| {
                 vec![Image {
                     size: 32,
@@ -73,17 +73,20 @@ fn frame(mut millis: u32, size: u32, images: &[Image]) -> Image {
     unreachable!()
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 enum Error {
+    #[error("Theme has no default cursor")]
     NoDefaultCursor,
-    File(std::io::Error),
+    #[error("Error opening xcursor file: {0}")]
+    File(#[from] std::io::Error),
+    #[error("Failed to parse XCursor file")]
     Parse,
 }
 
 fn load_icon(theme: &CursorTheme) -> Result<Vec<Image>, Error> {
     let icon_path = theme.load_icon("default").ok_or(Error::NoDefaultCursor)?;
-    let mut cursor_file = std::fs::File::open(&icon_path).unwrap();
+    let mut cursor_file = std::fs::File::open(&icon_path)?;
     let mut cursor_data = Vec::new();
-    cursor_file.read_to_end(&mut cursor_data).unwrap();
+    cursor_file.read_to_end(&mut cursor_data)?;
     parse_xcursor(&cursor_data).ok_or(Error::Parse)
 }
