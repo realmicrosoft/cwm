@@ -8,33 +8,12 @@ use std::os::raw::{c_ulong};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use libsex::bindings::glXSwapBuffers;
+use libsex::bindings::{GL_COLOR_BUFFER_BIT, glClear, glClearColor, glXSwapBuffers};
 use xcb::{composite, Connection, glx, x, Xid};
 use crate::types::CumWindow;
 use crate::helpers::{allow_input_passthrough, draw_x_window, rgba_to_bgra};
+use crate::linkedlist::LinkedList;
 use crate::setup::{setup_compositing, setup_desktop, setup_glx};
-
-fn redraw_desktop(conn: &Connection, pic_id: xcb::render::Picture, desktop_pic_id: xcb::render::Picture, src_width: u16, src_height: u16) {
-    let cookie = conn.send_request_checked(&xcb::render::Composite {
-        op: xcb::render::PictOp::Over,
-        src: pic_id,
-        mask: xcb::render::Picture::none(),
-        dst: desktop_pic_id,
-        src_x: 0,
-        src_y: 0,
-        mask_x: 0,
-        mask_y: 0,
-        dst_x: 0,
-        dst_y: 0,
-        width: src_width,
-        height: src_height,
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error compositing picture");
-    }
-}
 
 fn load_image(conn: &Connection, root: x::Window, gcon_id: x::Gcontext, pict_format: xcb::render::Pictformat, image_name: &str) -> xcb::render::Picture {// load the bg.png image
     let bg_image_load = stb_image::image::load(image_name);
@@ -106,7 +85,7 @@ fn main() {
     let mut src_width = screen.width_in_pixels();
     let mut src_height = screen.height_in_pixels();
 
-    let mut windows: Vec<types::CumWindow> = Vec::new();
+    let mut windows = LinkedList::new();
 
     let mut accent_color = 0xFFFF0000;
 
@@ -135,7 +114,7 @@ fn main() {
 
     let (overlay_window, pict_format) = setup_compositing(&conn, root);
 
-    let (ctx, display, visual, fbconfigs, overlay) =
+    let (ctx, display, visual, fbconfigs) =
         unsafe { setup_glx(overlay_window.resource_id() as u64,src_width as u32, src_height as u32, screen_num) };
 
     let gcon_id: x::Gcontext = conn.generate_id();
@@ -180,7 +159,6 @@ fn main() {
     let mut now = SystemTime::now();
     let mut t = 0;
     let mut need_redraw = true;
-    let mut window_active = 0;
     let mut dragging = false;
 
     let mut desktop_window = CumWindow {
@@ -193,6 +171,9 @@ fn main() {
         is_opening: false,
         animation_time: 0
     };
+
+    let mut windows_to_destroy: Vec<x::Window> = Vec::new();
+    let mut windows_to_configure: Vec<CumWindow> = Vec::new();
 
     let mut cursor_x = 0;
     let mut cursor_y = 0;
@@ -211,12 +192,17 @@ fn main() {
                         } else {
                             // check if this is a frame window
                             let mut found = false;
-                            for w in windows.clone().iter() {
-                                if w.frame_id == ev.window() {
-                                    println!("nevermind, it is a frame");
+                            let mut checking: Option<*mut linkedlist::Element> = windows.index(0);
+                            while checking.is_some() {
+                                if checking.is_none() {
+                                    break;
+                                }
+                                let mut el = unsafe { &mut *checking.unwrap() };
+                                if el.value.frame_id == ev.window() {
                                     found = true;
                                     break;
                                 }
+                                checking = windows.next_element(checking.unwrap());
                             }
                             if !found {
                                 /*let centre_x = (src_width / 2) - (ev.width() / 2);
@@ -271,57 +257,29 @@ fn main() {
                         }
                     }
                     xcb::Event::X(x::Event::DestroyNotify(ev)) => {
-                        // find the window in the list
+                        // add to the list of windows to destroy
+                        windows_to_destroy.push(ev.window());
                         need_redraw = true;
-                        let mut found = false;
-                        for w in windows.clone().iter_mut() {
-                            if w.window_id == ev.window() {
-                                found = true;
-                                // destroy the frame
-                                conn.send_request(&xcb::x::DestroyWindow {
-                                    window: w.frame_id,
-                                });
-                                // remove the window
-                                let mut i = 0;
-                                for w in windows.clone().iter() {
-                                    if w.window_id == ev.window() {
-                                        break;
-                                    }
-                                    i += 1;
-                                }
-                                windows.remove(i);
-                            }
-                        }
                     }
                     xcb::Event::X(x::Event::ConfigureNotify(ev)) => {
                         // check if the window is the root window
                         if ev.window() == root {
                             src_height = ev.height();
                             src_width = ev.width();
-                            // todo: resize the sdl window
+                            // todo: resize the sdl window (do we still need to do this?)
                         }
-                        let mut found = false;
-                        for w in windows.iter_mut() {
-                            if w.window_id == ev.window() {
-                                found = true;
-                                // update frame window position
-                                conn.send_request(&xcb::x::ConfigureWindow {
-                                    window: w.frame_id,
-                                    value_list: &[
-                                        x::ConfigWindow::X(ev.x() as i32 - 10),
-                                        x::ConfigWindow::Y(ev.y() as i32 - 20),
-                                        x::ConfigWindow::Width(ev.width() as u32 + 20),
-                                        x::ConfigWindow::Height(ev.height() as u32 + 20),
-                                    ],
-                                });
-                                w.x = ev.x();
-                                w.y = ev.y();
-                                w.width = ev.width();
-                                w.height = ev.height();
-                                need_redraw = true;
-                                break;
-                            }
-                        }
+                        // add to windows to configure
+                        windows_to_configure.push(CumWindow{
+                            x: ev.x() as i16,
+                            y: ev.y() as i16,
+                            width: ev.width(),
+                            height: ev.height(),
+                            window_id: ev.window(),
+                            frame_id: x::Window::none(),
+                            is_opening: false,
+                            animation_time: 0,
+                        });
+                        need_redraw = true;
                     }
                     xcb::Event::X(x::Event::Expose(ev)) => {
                         // map window
@@ -338,15 +296,7 @@ fn main() {
                     xcb::Event::X(x::Event::ButtonPress(ev)) => {
                         if ev.detail() == 1 {
                             // left click
-                            if ev.event() == root {
-                                continue;
-                            }
-                            for (tmp, w) in windows.iter_mut().enumerate() {
-                                if w.window_id == ev.event() {
-                                    println!("{}", tmp);
-                                    break;
-                                }
-                            }
+                            println!("left click");
                         }
                     },
                     xcb::Event::X(x::Event::MotionNotify(ev)) => {
@@ -374,10 +324,45 @@ fn main() {
             if need_redraw {
                 conn.flush().expect("Error flushing");
 
+                unsafe {
+                    glClearColor(0.29, 0.19, 0.3, 1.0);
+                    glClear(GL_COLOR_BUFFER_BIT);
+                }
+
                 // draw the desktop
                 draw_x_window(&conn, desktop_window, display, visual, fbconfigs);
 
-                for w in windows.iter_mut() {
+                let mut el = windows.index(0);
+                let mut i = 0;
+                while el.is_some() {
+                    let w = unsafe { (*el.unwrap()).value };
+                    // if we need to destroy this window, do so
+                    if windows_to_destroy.contains(&w.window_id) {
+                        conn.send_request(&x::DestroyWindow {
+                            window: w.window_id,
+                        });
+                        conn.flush().expect("Error flushing");
+                        windows.remove_at_index(i).expect("Error removing window");
+                        el = windows.index(0);
+                        i = 0;
+                        continue;
+                    }
+
+                    // if we need to configure this window, do so
+                    if windows_to_configure.contains(&w) {
+                        conn.send_request(&x::ConfigureWindow {
+                            window: w.window_id,
+                            value_list: &[
+                                x::ConfigWindow::X(w.x as i32),
+                                x::ConfigWindow::Y(w.y as i32),
+                                x::ConfigWindow::Width(w.width as u32),
+                                x::ConfigWindow::Height(w.height as u32),
+                            ],
+                        });
+                        conn.flush().expect("Error flushing");
+                        windows_to_configure.retain(|x| x != &w);
+                    }
+
                     // set the window's border color
                     conn.send_request(&x::ChangeWindowAttributes {
                         window: w.frame_id,
@@ -389,16 +374,17 @@ fn main() {
                     conn.flush().expect("Error flushing");
 
                     // draw the window
-                    draw_x_window(&conn, *w, display, visual, fbconfigs);
+                    draw_x_window(&conn, w, display, visual, fbconfigs);
+
+                    el = windows.next_element(el.unwrap());
+                    i += 1;
                 }
 
                 unsafe {
                     glXSwapBuffers(display, overlay_window.resource_id() as u64);
                 }
-
                 conn.flush().expect("Error flushing");
                 now = after;
-
                 need_redraw = false;
             }
         }

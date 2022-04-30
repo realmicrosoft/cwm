@@ -1,10 +1,10 @@
 use std::num::NonZeroU32;
 use std::os::raw::c_int;
 use std::ptr;
-use libsex::bindings::{AllocNone, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_RED_SIZE, GLX_RGBA, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, Window, XCompositeGetOverlayWindow, XCreateColormap, XDefaultRootWindow, XOpenDisplay, XRootWindow};
+use libsex::bindings::{AllocNone, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_RED_SIZE, GLX_RGBA, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, Window, XCreateColormap, XDefaultRootWindow, XOpenDisplay, XRootWindow, XSetErrorHandler};
 use stb_image::image::LoadResult;
 use xcb::{composite, Connection, x, Xid};
-use crate::{allow_input_passthrough, fr, redraw_desktop, rgba_to_bgra};
+use crate::{allow_input_passthrough, fr, rgba_to_bgra};
 
 pub fn setup_compositing(conn: &Connection, root: xcb::x::Window) -> (xcb::x::Window, xcb::render::Pictformat) {
     // query version of composite extension so that we get a panic early on if it's not available
@@ -240,9 +240,6 @@ pub fn setup_desktop(conn: &Connection, visual: xcb::x::Visualid,
         println!("Error creating picture");
     }
 
-    // composite picture onto window
-    redraw_desktop(&conn, pic_id, desktop_pic_id, src_width, src_height);
-
     // map the window
     let cookie = conn.send_request_checked(&xcb::x::MapWindow {
         window: desktop_id,
@@ -254,14 +251,19 @@ pub fn setup_desktop(conn: &Connection, visual: xcb::x::Visualid,
     }
 
     // flush all requests
-    conn.flush();
+    conn.flush().expect("Error flushing");
 
-    (desktop_id)
+    desktop_id
+}
+
+unsafe extern "C" fn error_handler(display: *mut libsex::bindings::Display, error_event: *mut libsex::bindings::XErrorEvent) -> c_int {
+    unsafe { println!("X Error: {}", (*error_event).error_code); }
+    0
 }
 
 pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen: i32)
-    -> (GLXContext, *mut libsex::bindings::Display, *mut libsex::bindings::XVisualInfo, *mut libsex::bindings::GLXFBConfig,
-        libsex::bindings::Window) {
+    -> (GLXContext, *mut libsex::bindings::Display, *mut libsex::bindings::XVisualInfo, *mut libsex::bindings::GLXFBConfig) {
+    libsex::bindings::XSetErrorHandler(Some(error_handler));
     let display = XOpenDisplay(ptr::null());
     if display.is_null() {
         panic!("Could not open display");
@@ -272,11 +274,6 @@ pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen
     if visual.is_null() {
         panic!("Could not choose visual");
     }
-/*
-    let overlay = XCompositeGetOverlayWindow(display, XDefaultRootWindow(display));
-
- */
-    //let cmap = XCreateColormap(display, XRootWindow(display, 0), (*visual).visual, AllocNone as c_int);
     let ctx = glXCreateContext(display, visual, ptr::null_mut(), 1);
     if ctx.is_null() {
         panic!("Could not create context");
@@ -317,5 +314,5 @@ pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen
         bottom = 0.0;
     }
 
-    (ctx, display, visinfo, fbconfigs, overlay)
+    (ctx, display, visinfo, fbconfigs)
 }

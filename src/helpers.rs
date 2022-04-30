@@ -97,5 +97,6 @@ pub fn draw_x_window(conn: &Connection, window: CumWindow, display: *mut Display
         glEnd();
 
         glXReleaseTexImageEXT(display, glx_pixmap, GLX_FRONT_LEFT_EXT as c_int);
+        glXDestroyPixmap(display, glx_pixmap);
     }
 }

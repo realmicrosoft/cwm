@@ -2,8 +2,8 @@
 
 use crate::types;
 
-struct Element {
-    value: types::CumWindow,
+pub struct Element {
+    pub(crate) value: types::CumWindow,
     next: Option<*mut Element>
 }
 
@@ -39,7 +39,7 @@ impl LinkedList {
         if index >= self.length {
             return None;
         }
-        if index <= 0 {
+        if index == 0 {
             return None; // this cannot be done
         }
         let mut current = self.bottom;
@@ -113,4 +113,13 @@ impl LinkedList {
         Ok(())
     }
 
+    pub fn next_element(&self, element: *mut Element) -> Option<*mut Element> {
+        unsafe {
+            (*element).next
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
 }
