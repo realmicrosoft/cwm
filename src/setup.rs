@@ -1,13 +1,13 @@
 use std::ffi::CStr;
 use std::num::NonZeroU32;
 use std::os::raw::{c_char, c_int, c_long, c_uint, c_ulong};
-use std::ptr;
+use std::{mem, ptr};
 use std::ptr::{null, null_mut};
-use libsex::bindings::{_XImage_funcs, AllocNone, CompositeRedirectManual, CopyFromParent, CWColormap, CWEventMask, Display, ExposureMask, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, InputOutput, LSBFirst, PictOpSrc, Screen, ShapeBounding, ShapeInput, Visual, Window, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCreateColormap, XCreatePixmap, XCreateWindow, XDefaultRootWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XGetErrorText, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderFindVisualFormat, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSetErrorHandler, XSetWindowAttributes, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
+use libsex::bindings::{_XImage_funcs, AllocNone, CompositeRedirectManual, CopyFromParent, CWColormap, CWEventMask, Display, ExposureMask, GC, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, InputOutput, LSBFirst, PictOpSrc, Screen, ShapeBounding, ShapeInput, Visual, Window, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultRootWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XGetErrorText, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderFindVisualFormat, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
 use stb_image::image::LoadResult;
 use crate::{allow_input_passthrough, fr, rgba_to_bgra};
 
-pub fn setup_compositing(display: *mut Display, root: Window) -> (Window) {
+pub fn setup_compositing(display: *mut Display, root: Window) -> (Window, GC) {
     // redirect subwindows of root window
     unsafe {
         XCompositeRedirectSubwindows(display, root, CompositeRedirectManual as c_int);
@@ -25,10 +25,14 @@ pub fn setup_compositing(display: *mut Display, root: Window) -> (Window) {
     }
     allow_input_passthrough(display, overlay_window, 0, 0);
 
-    overlay_window
+    let gc = unsafe {
+        XCreateGC(display, overlay_window, 0, null_mut())
+    };
+
+    (overlay_window, gc)
 }
 
-pub fn setup_desktop(display: *mut Display, screen: *mut Screen, visual: *mut Visual,root: Window,
+pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut Visual,root: Window,
                      src_width: u16, src_height: u16) -> Window{
 
     let desktop = unsafe { XCreateWindow(display,  root,
@@ -106,45 +110,29 @@ pub fn setup_desktop(display: *mut Display, screen: *mut Screen, visual: *mut Vi
     let mut bg_image_vec: Vec<u8> = bg_image_buffer.to_vec();
 
     // create a pixmap to draw on
-    let pixmap = unsafe {
+    let mut pixmap = unsafe {
         XCreatePixmap(display, desktop,
                       src_width as c_uint, src_height as c_uint,
                       CopyFromParent as c_uint)
     };
 
-    let mut image: XImage = XImage{
-        width: src_width as c_int,
-        height: src_height as c_int,
-        xoffset: 0,
-        format: ZPixmap as c_int,
-        data: bg_image_vec.as_mut_ptr() as *mut c_char,
-        byte_order: LSBFirst as c_int,
-        bitmap_unit: 32,
-        bitmap_bit_order: LSBFirst as c_int,
-        bitmap_pad: ZPixmap as c_int,
-        depth: 24,
-        bytes_per_line: 0,
-        bits_per_pixel: 32,
-        red_mask: 0, // suspicious
-        green_mask: 0, // point of the mask
-        blue_mask: 0, // i don't have a joke for this one
-        obdata: null_mut(),
-        f: _XImage_funcs {
-            create_image: None,
-            destroy_image: None,
-            get_pixel: None,
-            put_pixel: None,
-            sub_image: None,
-            add_pixel: None
-        }
+    let mut img: *mut XImage = unsafe { mem::zeroed() };
+
+    img = unsafe {
+        XCreateImage(display, visual, 24, ZPixmap as c_int, 0,
+                     rgba_to_bgra(&bg_image_vec).as_mut_ptr() as *mut c_char,
+                     bg_image_width.get(), bg_image_height.get(), 32, 0)
     };
+
     unsafe {
-        XInitImage(&mut image);
+        XInitImage(img);
     }
 
     // put the image on the pixmap
     unsafe {
-        XPutImage(display, pixmap, (*screen).default_gc, &mut image, 0, 0, 0, 0, src_width as c_uint, src_height as c_uint);
+        XPutImage(display, pixmap, gc, img, 0, 0, 0, 0,
+                  bg_image_width.get() as c_uint, bg_image_height.get() as c_uint);
+        XSync(display, 0);
     }
 
     // calculate the amount of times to multiply the image by

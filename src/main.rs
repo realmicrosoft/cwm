@@ -78,12 +78,12 @@ fn main() {
 
     let mut accent_color = 0xFFFF0000;
 
-    let overlay_window = setup_compositing(display, root);
+    let (overlay_window, gc) = setup_compositing(display, root);
 
     let (ctx, display, visual, fbconfigs, value) =
         unsafe { setup_glx(overlay_window,src_width as u32, src_height as u32, screen) };
 
-    let desktop_id = unsafe { setup_desktop(display, screen, (*visual).visual, root, src_width as u16, src_height as u16) };
+    let desktop_id = unsafe { setup_desktop(display, gc, (*visual).visual, root, src_width as u16, src_height as u16) };
 
     unsafe {
         XSync(display, 0);
