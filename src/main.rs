@@ -334,7 +334,7 @@ fn main() {
 
                 let mut el = windows.index(0);
                 let mut i = 0;
-                while el.is_some() {
+                while i < windows.len() {
                     let w = unsafe { (*el.unwrap()).value };
                     // if we need to destroy this window, do so
                     if windows_to_destroy.contains(&w.window_id) {
@@ -345,11 +345,7 @@ fn main() {
                         windows.remove_at_index(i).expect("Error removing window");
                         el = windows.index(0);
                         i = 0;
-                        continue;
-                    }
-
-                    // if we need to configure this window, do so
-                    if windows_to_configure.contains(&w) {
+                    } else if windows_to_configure.contains(&w) {
                         conn.send_request(&x::ConfigureWindow {
                             window: w.window_id,
                             value_list: &[
@@ -363,24 +359,23 @@ fn main() {
                         windows_to_configure.retain(|x| x != &w);
                         el = windows.index(0);
                         i = 0;
-                        continue;
+                    } else {
+                        // set the window's border color
+                        conn.send_request(&x::ChangeWindowAttributes {
+                            window: w.frame_id,
+                            value_list: &[
+                                x::Cw::BorderPixel(accent_color as u32),
+                            ],
+                        });
+
+                        conn.flush().expect("Error flushing");
+
+                        // draw the window
+                        draw_x_window(&conn, w, display, visual, fbconfigs);
+
+                        el = windows.next_element(el.unwrap());
+                        i += 1;
                     }
-
-                    // set the window's border color
-                    conn.send_request(&x::ChangeWindowAttributes {
-                        window: w.frame_id,
-                        value_list: &[
-                            x::Cw::BorderPixel(accent_color as u32),
-                        ],
-                    });
-
-                    conn.flush().expect("Error flushing");
-
-                    // draw the window
-                    draw_x_window(&conn, w, display, visual, fbconfigs);
-
-                    el = windows.next_element(el.unwrap());
-                    i += 1;
                 }
 
                 unsafe {
