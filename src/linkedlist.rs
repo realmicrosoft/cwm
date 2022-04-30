@@ -49,6 +49,8 @@ impl LinkedList {
         }
         if before_index.is_some() {
             return (unsafe{(*before_index.unwrap()).next}, before_index);
+        } else if at_index.is_some() {
+            return (at_index, before_index);
         } else {
             let mut current = self.bottom;
             for _ in 0..index - 1 {
