@@ -1,9 +1,9 @@
-use std::ffi::CStr;
+use std::ffi::{c_void, CStr};
 use std::num::NonZeroU32;
 use std::os::raw::{c_char, c_int, c_long, c_uint, c_ulong};
 use std::{mem, ptr};
 use std::ptr::{null, null_mut};
-use libsex::bindings::{_XImage_funcs, AllocNone, CompositeRedirectManual, CopyFromParent, CWColormap, CWEventMask, Display, ExposureMask, GC, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, InputOutput, LSBFirst, PictOpSrc, Screen, ShapeBounding, ShapeInput, Visual, Window, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultRootWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XGetErrorText, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderFindVisualFormat, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
+use libsex::bindings::{_XImage_funcs, AllocNone, CompositeRedirectManual, CopyFromParent, CWColormap, CWEventMask, Display, ExposureMask, GC, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, InputOutput, LSBFirst, PictFormat, PictOpSrc, Screen, ShapeBounding, ShapeInput, Visual, Window, X_RenderQueryPictFormats, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultRootWindow, XDestroyWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XFree, XFreePixmap, XGetErrorText, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderDirectFormat, XRenderFindVisualFormat, XRenderPictFormat, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
 use stb_image::image::LoadResult;
 use crate::{allow_input_passthrough, fr, rgba_to_bgra};
 
@@ -32,13 +32,13 @@ pub fn setup_compositing(display: *mut Display, root: Window) -> (Window, GC) {
     (overlay_window, gc)
 }
 
-pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut Visual,root: Window,
+pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut XVisualInfo, pict_format: *mut XRenderPictFormat, root: Window,
                      src_width: u16, src_height: u16) -> Window{
 
     let desktop = unsafe { XCreateWindow(display,  root,
                                          0, 0,
                                          src_width as c_uint, src_height as c_uint,
-                                         0, CopyFromParent as c_int, InputOutput, visual, 0, &mut XSetWindowAttributes {
+                                         0, CopyFromParent as c_int, InputOutput, (*visual).visual, 0, &mut XSetWindowAttributes {
             background_pixmap: 0,
             background_pixel: 0,
             border_pixmap: 0,
@@ -118,11 +118,17 @@ pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut Visual,root: Wi
 
     let mut img: *mut XImage = unsafe { mem::zeroed() };
 
+    let data = rgba_to_bgra(&bg_image_vec).as_mut_ptr() as *mut c_char;
+
     img = unsafe {
-        XCreateImage(display, visual, 24, ZPixmap as c_int, 0,
-                     rgba_to_bgra(&bg_image_vec).as_mut_ptr() as *mut c_char,
+        XCreateImage(display, (*visual).visual, 24, ZPixmap as c_int, 0,
+                     data,
                      bg_image_width.get(), bg_image_height.get(), 32, 0)
     };
+
+    unsafe {
+        XSync(display, 0);
+    }
 
     unsafe {
         XInitImage(img);
@@ -132,7 +138,6 @@ pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut Visual,root: Wi
     unsafe {
         XPutImage(display, pixmap, gc, img, 0, 0, 0, 0,
                   bg_image_width.get() as c_uint, bg_image_height.get() as c_uint);
-        XSync(display, 0);
     }
 
     // calculate the amount of times to multiply the image by
@@ -142,11 +147,6 @@ pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut Visual,root: Wi
             [0.0 as XFixed, 1.0 as XFixed, 0.0 as XFixed],
             [0.0 as XFixed, 0.0 as XFixed, divide_factor as XFixed]
         ]
-    };
-
-    // get pictformat
-    let pict_format = unsafe {
-        XRenderFindVisualFormat(display, visual)
     };
 
     // create picture from pixmap
@@ -175,26 +175,31 @@ pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut Visual,root: Wi
         XMapWindow(display, desktop);
     }
 
+    // free the pixmap
+    unsafe {
+        XFreePixmap(display, pixmap);
+    }
+
     desktop
 }
 
-unsafe extern "C" fn error_handler(display: *mut libsex::bindings::Display, error_event: *mut libsex::bindings::XErrorEvent) -> c_int {
-    unsafe {
-        let mut buffer: [c_char; 256] = [0; 256];
-        XGetErrorText(display, (*error_event).error_code as c_int, buffer.as_mut_ptr(), 256);
-        println!("{}", CStr::from_ptr(buffer.as_ptr()).to_str().unwrap());
+unsafe fn XDestroyImage(p0: *mut XImage) {
+    if p0.is_null() {
+        return;
     }
-    0
+    if !(*p0).data.is_null() {
+        XFree((*p0).data as *mut c_void);
+    }
+    if !(*p0).obdata.is_null() {
+        XFree((*p0).obdata as *mut c_void);
+    }
+    XFree(p0 as *mut c_void);
 }
 
-pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen: *mut Screen)
-    -> (GLXContext, *mut libsex::bindings::Display, *mut libsex::bindings::XVisualInfo, libsex::bindings::GLXFBConfig,
-    c_int) {
-    XSetErrorHandler(Some(error_handler));
-    let display = XOpenDisplay(ptr::null());
-    if display.is_null() {
-        panic!("Could not open display");
-    }
+
+pub unsafe fn setup_glx(display: *mut Display, overlay: Window, src_width: u32, src_height: u32, screen: *mut Screen)
+    -> (GLXContext, *mut libsex::bindings::XVisualInfo, libsex::bindings::GLXFBConfig,
+    c_int, *mut XRenderPictFormat) {
     let visual = glXChooseVisual(display, 0, [
         GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, GLX_NONE,
     ].as_mut_ptr() as *mut c_int);
@@ -258,5 +263,10 @@ pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen
     }
     println!("wanted config: {}", wanted_config);
 
-    (ctx, display, visinfo, *fbconfigs.offset(wanted_config as isize), value)
+    // get pict format
+    let pict_format = unsafe {
+        XRenderFindVisualFormat(display, (*visual).visual)
+    };
+
+    (ctx, visinfo, *fbconfigs.offset(wanted_config as isize), value, pict_format)
 }

@@ -3,20 +3,33 @@ mod helpers;
 mod linkedlist;
 mod setup;
 
+use std::ffi::CStr;
 use std::mem;
 use std::num::NonZeroU32;
-use std::os::raw::{c_int, c_ulong};
+use std::os::raw::{c_char, c_int, c_ulong};
 use std::ptr::{null, null_mut};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_COLOR_BUFFER_BIT, GL_PROJECTION, glClear, glClearColor, glLoadIdentity, glMatrixMode, glOrtho, glViewport, glXSwapBuffers, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
+use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_COLOR_BUFFER_BIT, GL_PROJECTION, glClear, glClearColor, glLoadIdentity, glMatrixMode, glOrtho, glViewport, glXSwapBuffers, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XGetErrorText, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
 use crate::types::CumWindow;
 use crate::helpers::{allow_input_passthrough, draw_x_window, rgba_to_bgra};
 use crate::linkedlist::LinkedList;
 use crate::setup::{setup_compositing, setup_desktop, setup_glx};
 
+unsafe extern "C" fn error_handler(display: *mut libsex::bindings::Display, error_event: *mut libsex::bindings::XErrorEvent) -> c_int {
+    unsafe {
+        let mut buffer: [c_char; 256] = [0; 256];
+        XGetErrorText(display, (*error_event).error_code as c_int, buffer.as_mut_ptr(), 256);
+        println!("{}", CStr::from_ptr(buffer.as_ptr()).to_str().unwrap());
+    }
+    0
+}
+
 fn main() {
+    unsafe {
+        XSetErrorHandler(Some(error_handler));
+    }
     let mut display: *mut Display = null_mut();
     let mut screen: *mut Screen = null_mut();
     let mut root: Window = 0;
@@ -37,6 +50,9 @@ fn main() {
     if root == 0 {
         println!("Could not get root window");
         return;
+    }
+    unsafe {
+        XSync(display, 0);
     }
 
     // get dimensions
@@ -73,22 +89,31 @@ fn main() {
         src_height = attr.height;
         src_width = attr.width;
     }
+    unsafe {
+        XSync(display, 0);
+    }
 
     let mut windows = LinkedList::new();
 
     let mut accent_color = 0xFFFF0000;
 
     let (overlay_window, gc) = setup_compositing(display, root);
+    unsafe {
+        XSync(display, 0);
+    }
 
-    let (ctx, display, visual, fbconfigs, value) =
-        unsafe { setup_glx(overlay_window,src_width as u32, src_height as u32, screen) };
-
-    let desktop_id = unsafe { setup_desktop(display, gc, (*visual).visual, root, src_width as u16, src_height as u16) };
+    let (ctx, visual, fbconfigs, value, pict_format) =
+        unsafe { setup_glx(display, overlay_window,src_width as u32, src_height as u32, screen) };
 
     unsafe {
         XSync(display, 0);
     }
 
+    let desktop_id = unsafe { setup_desktop(display, gc, visual, pict_format, root, src_width as u16, src_height as u16) };
+
+    unsafe {
+        XSync(display, 0);
+    }
     let mut now = SystemTime::now();
     let mut t = 0;
     let mut need_redraw = true;
@@ -112,8 +137,13 @@ fn main() {
     let mut cursor_x = 0;
     let mut cursor_y = 0;
 
+    unsafe {
+        XSync(display, 0);
+    }
+
     loop {
         let events_pending = unsafe { XEventsQueued(display, QueuedAlready as c_int) };
+        println!("{}", events_pending);
         // if we have an event
         if events_pending > 0 {
             let mut event: XEvent = unsafe { mem::zeroed() };
@@ -177,9 +207,6 @@ fn main() {
                                 frame_windows.push(frame_id);
 
                                  */
-                                unsafe {
-                                    XSync(display, 0);
-                                }
                                 windows.push(CumWindow {
                                     window_id: ev.window,
                                     frame_id: 0,
@@ -226,7 +253,6 @@ fn main() {
                         unsafe {
                             let ev = event.xexpose;
                             XMapWindow(display, ev.window);
-                            XSync(display, 0);
                         }
                         need_redraw = true;
                     }
@@ -262,7 +288,6 @@ fn main() {
 
             if need_redraw {
                 unsafe {
-                    XSync(display, 0);
                     glClearColor(0.29, 0.19, 0.3, 1.0);
                     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -294,7 +319,6 @@ fn main() {
                     if windows_to_destroy.contains(&w.window_id) {
                         unsafe {
                             XDestroyWindow(display, w.window_id);
-                            XSync(display, 0);
                         }
                         windows.remove_at_index(i).expect("Error removing window");
                         el = windows.index(0);
@@ -310,7 +334,6 @@ fn main() {
                                 sibling: 0,
                                 stack_mode: 0
                             });
-                            XSync(display, 0);
                         }
                         windows_to_configure.retain(|x| x != &w);
                         el = windows.index(0);
@@ -347,7 +370,6 @@ fn main() {
 
                 unsafe {
                     glXSwapBuffers(display, overlay_window);
-                    XSync(display, 0);
                 }
                 now = after;
                 need_redraw = false;
