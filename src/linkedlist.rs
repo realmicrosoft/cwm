@@ -1,5 +1,6 @@
 // about to make a ton of rust programmers upset (:
 
+use std::fmt::format;
 use crate::types;
 
 pub struct Element {
@@ -35,38 +36,57 @@ impl LinkedList {
         current
     }
 
-    pub fn index_and_before(&self, index:usize) -> Option<(*mut Element, *mut Element)> {
+    pub fn index_and_before(&self, index:usize) -> (Option<*mut Element>, Option<*mut Element>) {
+        let mut at_index: Option<*mut Element> = None;
+        let mut before_index: Option<*mut Element> = None;
         if index >= self.length {
-            return None;
+            at_index = None;
+            before_index = None;
         }
         if index == 0 {
-            return None; // this cannot be done
+            at_index = self.bottom;
+            before_index = None;
         }
-        let mut current = self.bottom;
-        for _ in 0..index-1 {
-            current = unsafe { (*current.unwrap()).next };
+        if before_index.is_some() {
+            return (unsafe{(*before_index.unwrap()).next}, before_index);
+        } else {
+            let mut current = self.bottom;
+            for _ in 0..index - 1 {
+                current = unsafe { (*current.unwrap()).next };
+            }
+            return (unsafe{(*current.unwrap()).next}, current);
         }
-        Some((current.unwrap(), unsafe { (*current.unwrap()).next.unwrap() }))
     }
 
     pub fn move_to_head (&mut self, index: usize) -> Result<(), String> {
         // get the element at the index
         let elements = self.index_and_before(index);
-        if elements.is_none() {
-            return Err("index out of bounds".to_string());
-        }
 
-        let (before, element) = elements.unwrap();
-        unsafe {
-            // change top item's next to the element
-            (*self.top.unwrap()).next = Some(element);
-            // change the before's next to the original element's next
-            (*before).next = (*element).next;
-            // change the element's next to none
-            (*element).next = None;
-        }
+        // if before isn't found, we're at the bottom; thus, we don't need to change the previous element
+        if elements.1.is_none() && elements.0.is_some() {
+            unsafe {
+                // change top item's next to the element
+                (*self.top.unwrap()).next = elements.0;
+                // change the bottom to the element's next
+                self.bottom = (*elements.0.unwrap()).next;
+                // change the element's next to none
+                (*elements.0.unwrap()).next = None;
+            }
+            Ok(())
+        } else if elements.0.is_none() { // index doesn't exist, return error
+            return Err(format!("index {} doesn't exist", index));
+        } else {
+            unsafe {
+                // change top item's next to the element
+                (*self.top.unwrap()).next = elements.0;
+                // change the before's next to the original element's next
+                (*elements.1.unwrap()).next = (*elements.0.unwrap()).next;
+                // change the element's next to none
+                (*elements.0.unwrap()).next = None;
+            }
 
-        Ok(())
+            Ok(())
+        }
     }
 
     pub fn push(&mut self, value: types::CumWindow) -> Result<(), String> {
@@ -90,27 +110,28 @@ impl LinkedList {
 
     pub fn remove_at_index(&mut self, index: usize) -> Result<(), String> {
         if index >= self.length {
-            return Err("index out of bounds".to_string());
+            return Err(format!("index out of bounds: {}", index));
         }
 
         let elements = self.index_and_before(index);
-        if elements.is_none() {
-            return Err("index out of bounds".to_string());
-        }
-
-        let (before, element) = elements.unwrap();
-        unsafe {
-            if element == self.top.unwrap() {
-                self.top = (*element).next;
+        // if before isn't found, we're at the bottom; thus, just deallocate the element and set the bottom to the next element
+        if elements.1.is_none() && elements.0.is_some() {
+            unsafe {
+                Box::from_raw(elements.0.unwrap());
+                self.bottom = (*elements.0.unwrap()).next;
             }
-            if element == self.bottom.unwrap() {
-                self.bottom = (*element).next;
+            self.length -= 1;
+            Ok(())
+        } else if elements.0.is_none() { // index doesn't exist, return error
+            return Err(format!("index {} doesn't exist", index));
+        } else {
+            unsafe {
+                Box::from_raw(elements.0.unwrap());
+                (*elements.1.unwrap()).next = (*elements.0.unwrap()).next;
             }
-            (*before).next = (*element).next;
-            Box::from_raw(element);
+            self.length -= 1;
+            Ok(())
         }
-        self.length -= 1;
-        Ok(())
     }
 
     pub fn next_element(&self, element: *mut Element) -> Option<*mut Element> {
