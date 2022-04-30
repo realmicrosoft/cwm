@@ -9,5 +9,4 @@ edition = "2021"
 xcb = { version = "1.1.1", features = ["composite", "glx", "xfixes", "shape"] }
 stb_image = "0.2.4"
 fast_image_resize = "0.8.0"
-rogl = { version = "0.2.1", features=["loaded", "debug", "gl40", "gl33", "gl45"] }
-sdl2 = { version = "0.35.2" }
+libsex = { path = "../libsex" }

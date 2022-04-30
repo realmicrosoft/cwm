@@ -17,14 +17,11 @@ pub fn rgba_to_bgra(rgba_array: &[u8]) -> Vec<u8> {
 
 }
 
-use std::ffi::c_void;
-use rogl::bitflags::{GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT};
-use rogl::command::PFN_glEnable;
-use rogl::enums::{GL_ARRAY_BUFFER, GL_BGRA, GL_FALSE, GL_FLOAT, GL_LINEAR, GL_MODULATE, GL_QUADS, GL_RGB, GL_RGBA, GL_STATIC_DRAW, GL_TEXTURE_2D, GL_TEXTURE_ENV_MODE, GL_TEXTURE_MAG_FILTER, GL_TEXTURE_MIN_FILTER, GL_UNSIGNED_BYTE};
-use rogl::gl::context::GLContext;
-use rogl::gl::gl40::GL40;
-use rogl::gl::gl33::GL33;
-use sdl2::rect::Rect;
+use std::ffi::CStr;
+use std::os::raw::c_int;
+use std::ptr;
+use std::ptr::null;
+use libsex::bindings::*;
 use xcb::Connection;
 use xcb::{Xid};
 use crate::CumWindow;
@@ -58,51 +55,47 @@ pub fn allow_input_passthrough(conn: &Connection, window: xcb::x::Window,x: i16,
     r_id
 }
 
-pub fn draw_x_window(conn: &Connection, window: CumWindow, ctx: &sdl2::Sdl, mut canvas: &mut sdl2::render::WindowCanvas ) {
-    let cookie = conn.send_request(&xcb::x::GetImage{
-        format: xcb::x::ImageFormat::ZPixmap,
+pub fn draw_x_window(conn: &Connection, window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, fbconfigs: *mut GLXFBConfig) {
+    // get pixmap of window
+    let pixmap_id = conn.generate_id();
+    let cookie = conn.send_request(&xcb::x::CreatePixmap {
+        depth: 24,
+        pid: pixmap_id,
         drawable: xcb::x::Drawable::Window(window.window_id),
-        x: 0,
-        y: 0,
         width: window.width,
         height: window.height,
-        plane_mask: 0xffffffff,
     });
 
-    let reply = conn.wait_for_reply(cookie);
-    let reply = reply.expect("Failed to get image");
-    let image = reply.data();
-    let mut image_vec: Vec<u8> = Vec::from(image);
+    conn.flush();
 
-    let surface = sdl2::surface::Surface::from_data(
-        image_vec.as_mut_slice(),
-        window.width as u32,
-        window.height as u32,
-        window.width as u32 * 4,
-        sdl2::pixels::PixelFormatEnum::ARGB8888).unwrap();
+    // now unsafe time!
+    unsafe {
 
-    let texture_creator = canvas.texture_creator();
-    let texture = texture_creator.create_texture_from_surface(&surface).unwrap();
+        let glx_pixmap = glXCreatePixmap(display, *fbconfigs.offset(0),
+                                         pixmap_id.resource_id() as u64, null());
+        let mut texture: GLuint = 0;
+        glGenTextures(1, &mut texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
 
-    // draw
-    canvas.copy(&texture, None, Rect::new(0, 0, window.width as u32, window.height as u32)).unwrap();
+        glXBindTexImageEXT(display, glx_pixmap, GLX_FRONT_LEFT_EXT as c_int, ptr::null_mut());
 
-}
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR as GLint);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR as GLint);
 
-pub unsafe fn create_sdl2_context(src_width: u16, src_height: u16) -> (
-    sdl2::Sdl,
-    sdl2::video::Window,
-    sdl2::EventPump,
-) {
-    let sdl = sdl2::init().unwrap();
-    let video = sdl.video().unwrap();
-    let gl_attr = video.gl_attr();
-    let window = video
-        .window("CHAOTIC WINDOW MANAGER", src_width as u32, src_height as u32)
-        .position_centered()
-        .build()
-        .unwrap();
-    let event_loop = sdl.event_pump().unwrap();
+        let mut top: GLfloat;
+        let bottom: GLfloat;
 
-    (sdl, window, event_loop)
+        glBegin(GL_QUADS);
+        glTexCoord2d(0.0, 0.0);
+        glVertex2d(0.0, 0.0);
+        glTexCoord2d(1.0, 0.0);
+        glVertex2d(window.width as GLdouble, 0.0);
+        glTexCoord2d(1.0, 1.0);
+        glVertex2d(window.width as GLdouble, window.height as GLdouble);
+        glTexCoord2d(0.0, 1.0);
+        glVertex2d(0.0, window.height as GLdouble);
+        glEnd();
+
+        glXReleaseTexImageEXT(display, glx_pixmap, GLX_FRONT_LEFT_EXT as c_int);
+    }
 }

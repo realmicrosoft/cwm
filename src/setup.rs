@@ -1,4 +1,7 @@
 use std::num::NonZeroU32;
+use std::os::raw::c_int;
+use std::ptr;
+use libsex::bindings::{AllocNone, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_RED_SIZE, GLX_RGBA, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, Window, XCompositeGetOverlayWindow, XCreateColormap, XDefaultRootWindow, XOpenDisplay, XRootWindow};
 use stb_image::image::LoadResult;
 use xcb::{composite, Connection, x, Xid};
 use crate::{allow_input_passthrough, fr, redraw_desktop, rgba_to_bgra};
@@ -43,7 +46,7 @@ pub fn setup_compositing(conn: &Connection, root: xcb::x::Window) -> (xcb::x::Wi
     // check maximum request size
     println!("Maximum request size: {}", reply.unwrap().maximum_request_length());
 
-   /* // get overlay window
+   // get overlay window
     let cookie = conn.send_request(&xcb::composite::GetOverlayWindow {
         window: root,
     });
@@ -69,9 +72,7 @@ pub fn setup_compositing(conn: &Connection, root: xcb::x::Window) -> (xcb::x::Wi
     // allow input passthrough
     allow_input_passthrough(&conn, overlay_window, 0, 0);
 
-    */
-
-    (xcb::x::Window::none(), pict_format)
+    (overlay_window, pict_format)
 }
 
 pub fn setup_desktop(conn: &Connection, visual: xcb::x::Visualid,
@@ -256,4 +257,65 @@ pub fn setup_desktop(conn: &Connection, visual: xcb::x::Visualid,
     conn.flush();
 
     (desktop_id)
+}
+
+pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen: i32)
+    -> (GLXContext, *mut libsex::bindings::Display, *mut libsex::bindings::XVisualInfo, *mut libsex::bindings::GLXFBConfig,
+        libsex::bindings::Window) {
+    let display = XOpenDisplay(ptr::null());
+    if display.is_null() {
+        panic!("Could not open display");
+    }
+    let visual = glXChooseVisual(display, 0, [
+        GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, GLX_NONE,
+    ].as_mut_ptr() as *mut c_int);
+    if visual.is_null() {
+        panic!("Could not choose visual");
+    }
+/*
+    let overlay = XCompositeGetOverlayWindow(display, XDefaultRootWindow(display));
+
+ */
+    //let cmap = XCreateColormap(display, XRootWindow(display, 0), (*visual).visual, AllocNone as c_int);
+    let ctx = glXCreateContext(display, visual, ptr::null_mut(), 1);
+    if ctx.is_null() {
+        panic!("Could not create context");
+    }
+    glXMakeCurrent(display, overlay, ctx);
+    glViewport(0, 0, src_width as i32, src_height as i32);
+
+    let mut nfbconfigs = 0;
+    let fbconfigs = glXGetFBConfigs(display, screen, &mut nfbconfigs);
+    let visinfo = glXGetVisualFromFBConfig (display, *fbconfigs.offset(0));
+
+    let mut value: c_int = 1;
+
+    glXGetFBConfigAttrib (display, *fbconfigs.offset(0), GLX_DRAWABLE_TYPE as c_int, &mut value);
+
+    glXGetFBConfigAttrib (display, *fbconfigs.offset(0),
+                          GLX_BIND_TO_TEXTURE_TARGETS_EXT as c_int,
+                          &mut value);
+
+    glXGetFBConfigAttrib (display, *fbconfigs.offset(0),
+                          GLX_BIND_TO_TEXTURE_RGBA_EXT as c_int,
+                          &mut value);
+
+    glXGetFBConfigAttrib (display, *fbconfigs.offset(0),
+                          GLX_Y_INVERTED_EXT as c_int,
+                          &mut value);
+    let mut top: GLfloat = 0.0;
+    let mut bottom: GLfloat = 0.0;
+
+    if (value == 1)
+    {
+        top = 0.0;
+        bottom = 1.0;
+    }
+    else
+    {
+        top = 1.0;
+        bottom = 0.0;
+    }
+
+    (ctx, display, visinfo, fbconfigs, overlay)
 }
