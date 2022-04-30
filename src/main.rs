@@ -172,6 +172,7 @@ fn main() {
         animation_time: 0
     };
 
+    let mut frame_windows: Vec<x::Window> = Vec::new();
     let mut windows_to_destroy: Vec<x::Window> = Vec::new();
     let mut windows_to_configure: Vec<CumWindow> = Vec::new();
 
@@ -192,17 +193,9 @@ fn main() {
                         } else {
                             // check if this is a frame window
                             let mut found = false;
-                            let mut checking: Option<*mut linkedlist::Element> = windows.index(0);
-                            while checking.is_some() {
-                                if checking.is_none() {
-                                    break;
-                                }
-                                let mut el = unsafe { &mut *checking.unwrap() };
-                                if el.value.frame_id == ev.window() {
-                                    found = true;
-                                    break;
-                                }
-                                checking = windows.next_element(checking.unwrap());
+                            if frame_windows.contains(&ev.window()) {
+                                println!("nvm it's a frame window");
+                                found = true;
                             }
                             if !found {
                                 /*let centre_x = (src_width / 2) - (ev.width() / 2);
@@ -239,6 +232,9 @@ fn main() {
                                 conn.send_request(&xcb::x::MapWindow {
                                     window: frame_id,
                                 });
+                                conn.flush().expect("flush failed!");
+                                // add to the list of frames
+                                frame_windows.push(frame_id);
 
                                  */
                                 conn.flush().expect("flush failed!");
@@ -251,7 +247,7 @@ fn main() {
                                     height: ev.height(),
                                     is_opening: false,
                                     animation_time: 0,
-                                });
+                                }).expect("failed to add window");
                                 need_redraw = true;
                             }
                         }
@@ -335,6 +331,14 @@ fn main() {
                 let mut el = windows.index(0);
                 let mut i = 0;
                 while i < windows.len() {
+                    if el.is_none(){
+                        // if index is 0, there aren't any windows
+                        if windows.len() > 0 {
+                            el = windows.index(0);
+                        } else {
+                            break;
+                        }
+                    }
                     let w = unsafe { (*el.unwrap()).value };
                     // if we need to destroy this window, do so
                     if windows_to_destroy.contains(&w.window_id) {

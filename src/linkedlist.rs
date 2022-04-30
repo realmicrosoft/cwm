@@ -92,8 +92,8 @@ impl LinkedList {
     }
 
     pub fn push(&mut self, value: types::CumWindow) -> Result<(), String> {
-        let mut new_element = Box::new(Element {
-            value: value,
+        let new_element = Box::new(Element {
+            value,
             next: None
         });
         let new_element_ptr = Box::into_raw(new_element);
