@@ -11,9 +11,9 @@ use std::ptr::{null, null_mut};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_COLOR_BUFFER_BIT, GL_PROJECTION, glClear, glClearColor, glLoadIdentity, glMatrixMode, glOrtho, glViewport, glXSwapBuffers, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XGetErrorText, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
+use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_COLOR_BUFFER_BIT, GL_PROJECTION, GLclampf, glClear, glClearColor, glLoadIdentity, glMatrixMode, glOrtho, glViewport, glXSwapBuffers, QueuedAfterFlush, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XGetErrorText, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
 use crate::types::CumWindow;
-use crate::helpers::{allow_input_passthrough, draw_x_window, rgba_to_bgra};
+use crate::helpers::{allow_input_passthrough, draw_x_window, get_window_fb_config, rgba_to_bgra};
 use crate::linkedlist::LinkedList;
 use crate::setup::{setup_compositing, setup_desktop, setup_glx};
 
@@ -119,13 +119,15 @@ fn main() {
     let mut need_redraw = true;
     let mut dragging = false;
 
-    let mut desktop_window = CumWindow {
+    let fbconfig = unsafe { get_window_fb_config(desktop_id, display, screen) };
+    let desktop_window = CumWindow {
         x: 0,
         y: 0,
         width: src_width as u16,
         height: src_height as u16,
         window_id: desktop_id,
         frame_id: 0,
+        fbconfig,
         is_opening: false,
         animation_time: 0
     };
@@ -134,6 +136,10 @@ fn main() {
     let mut windows_to_destroy: Vec<Window> = Vec::new();
     let mut windows_to_configure: Vec<CumWindow> = Vec::new();
 
+    let mut r= 0.0f64;
+    let mut g= 0.0f64;
+    let mut b= 0.0f64;
+
     let mut cursor_x = 0;
     let mut cursor_y = 0;
 
@@ -141,11 +147,15 @@ fn main() {
         XSync(display, 0);
     }
 
+    let mut event: XEvent = unsafe { mem::zeroed() };
+
     loop {
+        unsafe {
+            XSync(display, 0);
+        }
         let events_pending = unsafe { XEventsQueued(display, QueuedAlready as c_int) };
         // if we have an event
         if events_pending > 0 {
-            let mut event: XEvent = unsafe { mem::zeroed() };
             unsafe {
                 XNextEvent(display, &mut event);
                 match event.type_ {
@@ -153,7 +163,7 @@ fn main() {
                         let ev = event.xcreatewindow;
                         println!("new window!");
                         // check the parent window to see if it's the root window
-                        if root != ev.parent || desktop_id == ev.window || overlay_window == ev.window {
+                        if root != ev.parent || desktop_id == ev.window || overlay_window == ev.window || ev.window == root {
                             println!("nevermind, it is root, desktop, or overlay");
                         } else {
                             // check if this is a frame window
@@ -166,7 +176,6 @@ fn main() {
                                 /*let centre_x = (src_width / 2) - (ev.width() / 2);
                                 let centre_y = (src_height / 2) - (ev.height() / 2);
                                 // change the main window to be in the centre of the screen
-                                 */
                                 // configure window
                                 unsafe {
                                     XConfigureWindow(display, ev.window, CWX | CWY | CWWidth | CWHeight, &mut XWindowChanges{
@@ -180,7 +189,7 @@ fn main() {
                                     });
                                 }
                                 // create the frame
-                                /*let frame_id = conn.generate_id();
+                                let frame_id = conn.generate_id();
                                 conn.send_request(&xcb::x::CreateWindow {
                                     depth: 24,
                                     wid: frame_id,
@@ -206,6 +215,7 @@ fn main() {
                                 frame_windows.push(frame_id);
 
                                  */
+                                let fbconfig = get_window_fb_config(ev.window, display, screen);
                                 windows.push(CumWindow {
                                     window_id: ev.window,
                                     frame_id: 0,
@@ -215,6 +225,7 @@ fn main() {
                                     height: ev.height as u16,
                                     is_opening: false,
                                     animation_time: 0,
+                                    fbconfig,
                                 }).expect("failed to add window");
                                 need_redraw = true;
                             }
@@ -234,6 +245,7 @@ fn main() {
                             src_width = ev.width;
                             // todo: resize the sdl window (do we still need to do this?)
                         }
+                        let fbconfig = get_window_fb_config(ev.window, display, screen);
                         // add to windows to configure
                         windows_to_configure.push(CumWindow{
                             x: ev.x as i16,
@@ -242,6 +254,7 @@ fn main() {
                             height: ev.height as u16,
                             window_id: ev.window,
                             frame_id: 0,
+                            fbconfig,
                             is_opening: false,
                             animation_time: 0,
                         });
@@ -268,7 +281,10 @@ fn main() {
                         cursor_x = ev.x_root;
                         cursor_y = ev.y_root;
                     }
-                    _ => {}
+                    _ => {
+                        println!("unhandled event");
+                        println!("{:?}", event.type_);
+                    }
                 }
             }
 
@@ -276,18 +292,19 @@ fn main() {
             if after.duration_since(now).unwrap().as_millis() > (1/60) {
                 // generate the rainbow using a sine wave
                 let frequency = 0.05;
-                let r = ((frequency * (t as f64) + 0.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
-                let g = ((frequency * (t as f64) + 2.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
-                let b = ((frequency * (t as f64) + 4.0).sin() * 127.0f64 + 128.0f64) as c_ulong;
+                r = ((frequency * (t as f64) + 0.0).sin() * 127.0f64 + 128.0f64);
+                g = ((frequency * (t as f64) + 2.0).sin() * 127.0f64 + 128.0f64);
+                b = ((frequency * (t as f64) + 4.0).sin() * 127.0f64 + 128.0f64);
 
-                accent_color = (((r << 16) | (g << 8) | (b)) | 0xFF000000) as u32;
+                accent_color = ((((r as u32) << 16) | ((g as u32) << 8) | (b as u32)) | 0xFF000000) as u32;
                 t += 1;
                 need_redraw = true;
+                now = after;
             }
 
             if need_redraw {
                 unsafe {
-                    glClearColor(0.29, 0.19, 0.3, 1.0);
+                    glClearColor((r/255.0f64) as GLclampf, (g/255.0f64) as GLclampf, (b/255.0f64) as GLclampf, 1.0);
                     glClear(GL_COLOR_BUFFER_BIT);
 
                     /*
@@ -299,7 +316,7 @@ fn main() {
                 }
 
                 // draw the desktop
-                draw_x_window(desktop_window, display, visual, fbconfigs, value);
+                draw_x_window(desktop_window, display, visual, value);
 
                 let mut el = windows.index(0);
                 let mut i = 0;
@@ -360,7 +377,7 @@ fn main() {
                         }
 
                         // draw the window
-                        draw_x_window(w, display, visual, fbconfigs, value);
+                        draw_x_window(w, display, visual, value);
 
                         el = windows.next_element(el.unwrap());
                         i += 1;
@@ -370,7 +387,6 @@ fn main() {
                 unsafe {
                     glXSwapBuffers(display, overlay_window);
                 }
-                now = after;
                 need_redraw = false;
             }
         }
