@@ -1,7 +1,9 @@
+use std::ffi::CStr;
 use std::num::NonZeroU32;
-use std::os::raw::c_int;
+use std::os::raw::{c_char, c_int, c_long, c_ulong};
 use std::ptr;
-use libsex::bindings::{AllocNone, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_RED_SIZE, GLX_RGBA, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, Window, XCreateColormap, XDefaultRootWindow, XOpenDisplay, XRootWindow, XSetErrorHandler};
+use std::ptr::{null, null_mut};
+use libsex::bindings::{AllocNone, CWColormap, CWEventMask, ExposureMask, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, InputOutput, ShapeBounding, ShapeInput, Window, XCreateColormap, XCreateWindow, XDefaultRootWindow, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XGetErrorText, XOpenDisplay, XReparentWindow, XRootWindow, XSetErrorHandler, XSetWindowAttributes, XVisualIDFromVisual, XVisualInfo};
 use stb_image::image::LoadResult;
 use xcb::{composite, Connection, x, Xid};
 use crate::{allow_input_passthrough, fr, rgba_to_bgra};
@@ -16,7 +18,7 @@ pub fn setup_compositing(conn: &Connection, root: xcb::x::Window) -> (xcb::x::Wi
     // redirect subwindows of root window
     let cookie = conn.send_request_checked(&xcb::composite::RedirectSubwindows {
         window: root,
-        update: composite::Redirect::Manual,
+        update: composite::Redirect::Automatic,
     });
 
     let checked = conn.check_request(cookie);
@@ -68,9 +70,6 @@ pub fn setup_compositing(conn: &Connection, root: xcb::x::Window) -> (xcb::x::Wi
             xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
         ],
     });
-
-    // allow input passthrough
-    allow_input_passthrough(&conn, overlay_window, 0, 0);
 
     (overlay_window, pict_format)
 }
@@ -257,13 +256,18 @@ pub fn setup_desktop(conn: &Connection, visual: xcb::x::Visualid,
 }
 
 unsafe extern "C" fn error_handler(display: *mut libsex::bindings::Display, error_event: *mut libsex::bindings::XErrorEvent) -> c_int {
-    unsafe { println!("X Error: {}", (*error_event).error_code); }
+    unsafe {
+        let mut buffer: [c_char; 256] = [0; 256];
+        XGetErrorText(display, (*error_event).error_code as c_int, buffer.as_mut_ptr(), 256);
+        println!("{}", CStr::from_ptr(buffer.as_ptr()).to_str().unwrap());
+    }
     0
 }
 
 pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen: i32)
-    -> (GLXContext, *mut libsex::bindings::Display, *mut libsex::bindings::XVisualInfo, *mut libsex::bindings::GLXFBConfig) {
-    libsex::bindings::XSetErrorHandler(Some(error_handler));
+    -> (GLXContext, *mut libsex::bindings::Display, *mut libsex::bindings::XVisualInfo, libsex::bindings::GLXFBConfig,
+    c_int) {
+    XSetErrorHandler(Some(error_handler));
     let display = XOpenDisplay(ptr::null());
     if display.is_null() {
         panic!("Could not open display");
@@ -278,41 +282,58 @@ pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen
     if ctx.is_null() {
         panic!("Could not create context");
     }
+
     glXMakeCurrent(display, overlay, ctx);
     glViewport(0, 0, src_width as i32, src_height as i32);
 
-    let mut nfbconfigs = 0;
+    let mut nfbconfigs = 10;
     let fbconfigs = glXGetFBConfigs(display, screen, &mut nfbconfigs);
-    let visinfo = glXGetVisualFromFBConfig (display, *fbconfigs.offset(0));
-
-    let mut value: c_int = 1;
-
-    glXGetFBConfigAttrib (display, *fbconfigs.offset(0), GLX_DRAWABLE_TYPE as c_int, &mut value);
-
-    glXGetFBConfigAttrib (display, *fbconfigs.offset(0),
-                          GLX_BIND_TO_TEXTURE_TARGETS_EXT as c_int,
-                          &mut value);
-
-    glXGetFBConfigAttrib (display, *fbconfigs.offset(0),
-                          GLX_BIND_TO_TEXTURE_RGBA_EXT as c_int,
-                          &mut value);
-
-    glXGetFBConfigAttrib (display, *fbconfigs.offset(0),
-                          GLX_Y_INVERTED_EXT as c_int,
-                          &mut value);
-    let mut top: GLfloat = 0.0;
-    let mut bottom: GLfloat = 0.0;
-
-    if (value == 1)
-    {
-        top = 0.0;
-        bottom = 1.0;
+    if fbconfigs.is_null() {
+        panic!("Could not get fbconfigs");
     }
-    else
-    {
-        top = 1.0;
-        bottom = 0.0;
-    }
+    let visualid = XVisualIDFromVisual((*visual).visual);
+    let mut visinfo: *mut XVisualInfo = null_mut();
+    let mut wanted_config = 0;
+    let mut value: c_int = 0;
+    for i in 0..nfbconfigs {
+        visinfo = glXGetVisualFromFBConfig (display, *fbconfigs.offset(i as isize));
+        if visinfo.is_null() || (*visinfo).visualid != visualid as u64 {
+            continue;
+        }
 
-    (ctx, display, visinfo, fbconfigs)
+        glXGetFBConfigAttrib (display, *fbconfigs.offset(i as isize), GLX_DRAWABLE_TYPE as c_int, &mut value);
+        if (value & GLX_PIXMAP_BIT as i32) != 1 {
+            continue;
+        }
+
+        glXGetFBConfigAttrib (display, *fbconfigs.offset(i as isize),
+                              GLX_BIND_TO_TEXTURE_TARGETS_EXT as c_int,
+                              &mut value);
+        if (value & GLX_TEXTURE_2D_BIT_EXT as i32) != 1 {
+            continue;
+        }
+
+        glXGetFBConfigAttrib (display, *fbconfigs.offset(i as isize),
+                              GLX_BIND_TO_TEXTURE_RGBA_EXT as c_int,
+                              &mut value);
+        if value == 0
+        {
+            glXGetFBConfigAttrib (display, *fbconfigs.offset(i as isize),
+                                  GLX_BIND_TO_TEXTURE_RGB_EXT as c_int,
+                                  &mut value);
+            if value == 0 {
+                continue;
+            }
+        }
+
+        glXGetFBConfigAttrib (display, *fbconfigs.offset(i as isize),
+                              GLX_Y_INVERTED_EXT as c_int,
+                              &mut value);
+
+        wanted_config = i;
+        break;
+    }
+    println!("wanted config: {}", wanted_config);
+
+    (ctx, display, visinfo, *fbconfigs.offset(wanted_config as isize), value)
 }

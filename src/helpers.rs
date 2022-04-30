@@ -20,52 +20,32 @@ pub fn rgba_to_bgra(rgba_array: &[u8]) -> Vec<u8> {
 use std::ffi::CStr;
 use std::os::raw::c_int;
 use std::ptr;
-use std::ptr::null;
+use std::ptr::{null, null_mut};
 use libsex::bindings::*;
 use xcb::Connection;
 use xcb::{Xid};
 use crate::CumWindow;
 
-pub fn allow_input_passthrough(conn: &Connection, window: xcb::x::Window,x: i16, y: i16) -> xcb::xfixes::Region {
-    // create copy of window bounding region
-    let r_id = conn.generate_id();
-    conn.send_request(&xcb::xfixes::CreateRegionFromWindow {
-        region: r_id,
-        window,
-        kind: xcb::shape::Sk::Bounding,
-    });
-    // translate it
-    conn.send_request(&xcb::xfixes::TranslateRegion {
-        region: r_id,
-        dx: -x,
-        dy: -y,
-    });
-   /* conn.send_request(&xcb::xfixes::SetPictureClipRegion {
-        picture: p_id,
-        region: r_id,
-        x_origin: 0,
-        y_origin: 0,
-    });
-    */
-    // delete the region
-    conn.send_request(&xcb::xfixes::DestroyRegion {
-        region: r_id,
-    });
-
-    r_id
+pub fn allow_input_passthrough(display: *mut Display, win: Window, x: i16, y: i16) {
+    unsafe {
+        let region = XFixesCreateRegion(display, null_mut(), 0);
+        XFixesSetWindowShapeRegion(display, win, ShapeBounding as c_int, 0, 0, 0);
+        XFixesSetWindowShapeRegion(display, win, ShapeInput as c_int, 0, 0, region);
+        XFixesDestroyRegion(display, region);
+    }
 }
 
-pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, fbconfigs: *mut GLXFBConfig) {
+pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, fbconfigs: GLXFBConfig, value: c_int) {
     // now unsafe time!
     unsafe {
         let pixmap = XCompositeNameWindowPixmap(display, window.window_id.resource_id() as u64);
 
-        let pixmapAttribs = [ GLX_TEXTURE_TARGET_EXT, GLX_TEXTURE_2D_EXT,
+        let pixmap_attribs = [ GLX_TEXTURE_TARGET_EXT, GLX_TEXTURE_2D_EXT,
             GLX_TEXTURE_FORMAT_EXT, GLX_TEXTURE_FORMAT_RGBA_EXT,
             GLX_NONE ];
 
-        let glx_pixmap = glXCreatePixmap(display, *fbconfigs.offset(0),
-                                         pixmap, pixmapAttribs.as_ptr() as *const c_int);
+        let glx_pixmap = glXCreatePixmap(display, fbconfigs,
+                                         pixmap, pixmap_attribs.as_ptr() as *const c_int);
         let mut texture: GLuint = 0;
         glGenTextures(1, &mut texture);
         glBindTexture(GL_TEXTURE_2D, texture);
@@ -75,8 +55,20 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR as GLint);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR as GLint);
 
-        let top: GLdouble = 1.0;
-        let bottom: GLdouble = 0.0;
+        let top: GLdouble;
+        let bottom: GLdouble;
+
+
+        if value == 1
+        {
+            top = 0.0;
+            bottom = 1.0;
+        }
+        else
+        {
+            top = 1.0;
+            bottom = 0.0;
+        }
 
         glBegin(GL_QUADS);
 

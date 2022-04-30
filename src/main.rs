@@ -114,7 +114,7 @@ fn main() {
 
     let (overlay_window, pict_format) = setup_compositing(&conn, root);
 
-    let (ctx, display, visual, fbconfigs) =
+    let (ctx, display, visual, fbconfigs, value) =
         unsafe { setup_glx(overlay_window.resource_id() as u64,src_width as u32, src_height as u32, screen_num) };
 
     let gcon_id: x::Gcontext = conn.generate_id();
@@ -320,13 +320,16 @@ fn main() {
                     glClearColor(0.29, 0.19, 0.3, 1.0);
                     glClear(GL_COLOR_BUFFER_BIT);
 
+                    /*
                     glMatrixMode(GL_PROJECTION);
                     glLoadIdentity();
-                    glOrtho(0.0, src_width as f64, src_height as f64, 0.0, -1.0, 1.0);
+                    glOrtho(-1.0, 1.0, -1.0, 1.0, 1.0, 20.0);
+
+                     */
                 }
 
                 // draw the desktop
-                draw_x_window(desktop_window, display, visual, fbconfigs);
+                draw_x_window(desktop_window, display, visual, fbconfigs, value);
 
                 let mut el = windows.index(0);
                 let mut i = 0;
@@ -376,7 +379,7 @@ fn main() {
                         conn.flush().expect("Error flushing");
 
                         // draw the window
-                        draw_x_window(w, display, visual, fbconfigs);
+                        draw_x_window(w, display, visual, fbconfigs, value);
 
                         el = windows.next_element(el.unwrap());
                         i += 1;
