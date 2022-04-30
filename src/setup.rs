@@ -100,7 +100,10 @@ pub fn setup_desktop(display: *mut Display, screen: *mut Screen, visual: *mut Vi
 
     alpha_mul_div.divide_alpha_inplace(&mut dst_view).unwrap();
 
-    let mut bg_image_data = dst_image.buffer();
+    let mut bg_image_buffer = dst_image.buffer();
+
+    // create a vec from the buffer so we can make it mutable
+    let mut bg_image_vec: Vec<u8> = bg_image_buffer.to_vec();
 
     // create a pixmap to draw on
     let pixmap = unsafe {
@@ -114,7 +117,7 @@ pub fn setup_desktop(display: *mut Display, screen: *mut Screen, visual: *mut Vi
         height: src_height as c_int,
         xoffset: 0,
         format: ZPixmap as c_int,
-        data: bg_image_data.as_mut_ptr() as *mut c_char,
+        data: bg_image_vec.as_mut_ptr() as *mut c_char,
         byte_order: LSBFirst as c_int,
         bitmap_unit: 32,
         bitmap_bit_order: LSBFirst as c_int,
