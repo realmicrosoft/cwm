@@ -335,6 +335,7 @@ fn main() {
                         // if index is 0, there aren't any windows
                         if windows.len() > 0 {
                             el = windows.index(0);
+                            i = 0;
                         } else {
                             break;
                         }
