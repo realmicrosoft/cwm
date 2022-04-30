@@ -43,7 +43,7 @@ pub fn setup_compositing(conn: &Connection, root: xcb::x::Window) -> (xcb::x::Wi
     // check maximum request size
     println!("Maximum request size: {}", reply.unwrap().maximum_request_length());
 
-    // get overlay window
+   /* // get overlay window
     let cookie = conn.send_request(&xcb::composite::GetOverlayWindow {
         window: root,
     });
@@ -67,9 +67,11 @@ pub fn setup_compositing(conn: &Connection, root: xcb::x::Window) -> (xcb::x::Wi
     });
 
     // allow input passthrough
-    allow_input_passthrough(&conn, overlay_window, r_id, 0, 0);
+    allow_input_passthrough(&conn, overlay_window, 0, 0);
 
-    (overlay_window, pict_format)
+    */
+
+    (xcb::x::Window::none(), pict_format)
 }
 
 pub fn setup_desktop(conn: &Connection, visual: xcb::x::Visualid,
