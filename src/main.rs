@@ -361,6 +361,9 @@ fn main() {
                         });
                         conn.flush().expect("Error flushing");
                         windows_to_configure.retain(|x| x != &w);
+                        el = windows.index(0);
+                        i = 0;
+                        continue;
                     }
 
                     // set the window's border color
