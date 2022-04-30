@@ -109,7 +109,7 @@ fn main() {
         XSync(display, 0);
     }
 
-    let desktop_id = unsafe { setup_desktop(display, gc, visual, pict_format, root, src_width as u16, src_height as u16) };
+    let desktop_id = unsafe { setup_desktop(display, gc, screen, pict_format, root, src_width as u16, src_height as u16) };
 
     unsafe {
         XSync(display, 0);
@@ -143,7 +143,6 @@ fn main() {
 
     loop {
         let events_pending = unsafe { XEventsQueued(display, QueuedAlready as c_int) };
-        println!("{}", events_pending);
         // if we have an event
         if events_pending > 0 {
             let mut event: XEvent = unsafe { mem::zeroed() };

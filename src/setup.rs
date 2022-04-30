@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use std::os::raw::{c_char, c_int, c_long, c_uint, c_ulong};
 use std::{mem, ptr};
 use std::ptr::{null, null_mut};
-use libsex::bindings::{_XImage_funcs, AllocNone, CompositeRedirectManual, CopyFromParent, CWColormap, CWEventMask, Display, ExposureMask, GC, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, InputOutput, LSBFirst, PictFormat, PictOpSrc, Screen, ShapeBounding, ShapeInput, Visual, Window, X_RenderQueryPictFormats, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultRootWindow, XDestroyWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XFree, XFreePixmap, XGetErrorText, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderDirectFormat, XRenderFindVisualFormat, XRenderPictFormat, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
+use libsex::bindings::{_XImage_funcs, _XTransform, AllocNone, CompositeRedirectManual, CopyFromParent, CPSubwindowMode, CWColormap, CWEventMask, Display, ExposureMask, GC, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, IncludeInferiors, InputOutput, LSBFirst, PictFormat, PictOpSrc, Screen, ShapeBounding, ShapeInput, Visual, Window, X_RenderQueryPictFormats, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultDepth, XDefaultDepthOfScreen, XDefaultRootWindow, XDefaultVisual, XDefaultVisualOfScreen, XDestroyWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XFree, XFreePixmap, XGetErrorText, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderDirectFormat, XRenderFindVisualFormat, XRenderPictFormat, XRenderPictureAttributes, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
 use stb_image::image::LoadResult;
 use crate::{allow_input_passthrough, fr, rgba_to_bgra};
 
@@ -32,13 +32,13 @@ pub fn setup_compositing(display: *mut Display, root: Window) -> (Window, GC) {
     (overlay_window, gc)
 }
 
-pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut XVisualInfo, pict_format: *mut XRenderPictFormat, root: Window,
+pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_format: *mut XRenderPictFormat, root: Window,
                      src_width: u16, src_height: u16) -> Window{
 
-    let desktop = unsafe { XCreateWindow(display,  root,
+    let desktop = unsafe { XCreateWindow(display, root,
                                          0, 0,
                                          src_width as c_uint, src_height as c_uint,
-                                         0, CopyFromParent as c_int, InputOutput, (*visual).visual, 0, &mut XSetWindowAttributes {
+                                         0, XDefaultDepthOfScreen(screen), InputOutput, XDefaultVisualOfScreen(screen), CWEventMask as c_ulong, &mut XSetWindowAttributes {
             background_pixmap: 0,
             background_pixel: 0,
             border_pixmap: 0,
@@ -55,6 +55,9 @@ pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut XVisualInfo, pi
             colormap: 0,
             cursor: 0
         }) };
+    unsafe {
+        XSync(display, 0);
+    }
 
     // load the bg.png image
     let bg_image_load = stb_image::image::load("bg.png");
@@ -113,17 +116,21 @@ pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut XVisualInfo, pi
     let mut pixmap = unsafe {
         XCreatePixmap(display, desktop,
                       src_width as c_uint, src_height as c_uint,
-                      CopyFromParent as c_uint)
+                      XDefaultDepthOfScreen(screen) as c_uint)
     };
+
+    unsafe {
+        XSync(display, 0);
+    }
 
     let mut img: *mut XImage = unsafe { mem::zeroed() };
 
     let data = rgba_to_bgra(&bg_image_vec).as_mut_ptr() as *mut c_char;
 
     img = unsafe {
-        XCreateImage(display, (*visual).visual, 24, ZPixmap as c_int, 0,
+        XCreateImage(display, XDefaultVisualOfScreen(screen), 24, ZPixmap as c_int, 0,
                      data,
-                     bg_image_width.get(), bg_image_height.get(), 32, 0)
+                     dst_width.get(), dst_height.get(), 32, 0)
     };
 
     unsafe {
@@ -133,41 +140,85 @@ pub fn setup_desktop(display: *mut Display, gc: GC, visual: *mut XVisualInfo, pi
     unsafe {
         XInitImage(img);
     }
+    unsafe {
+        XSync(display, 0);
+    }
 
     // put the image on the pixmap
     unsafe {
         XPutImage(display, pixmap, gc, img, 0, 0, 0, 0,
-                  bg_image_width.get() as c_uint, bg_image_height.get() as c_uint);
+                  dst_width.get() as c_uint, dst_height.get() as c_uint);
     }
-
-    // calculate the amount of times to multiply the image by
-    let mut transform: XTransform = XTransform {
-        matrix: [
-            [1.0 as XFixed, 0.0 as XFixed, 0.0 as XFixed],
-            [0.0 as XFixed, 1.0 as XFixed, 0.0 as XFixed],
-            [0.0 as XFixed, 0.0 as XFixed, divide_factor as XFixed]
-        ]
-    };
+    unsafe {
+        XSync(display, 0);
+    }
 
     // create picture from pixmap
     let picture = unsafe {
-        XRenderCreatePicture(display, pixmap, pict_format, 0, null_mut())
+        XRenderCreatePicture(display, pixmap, XRenderFindVisualFormat(display, XDefaultVisualOfScreen(screen)), CPSubwindowMode as c_ulong, &XRenderPictureAttributes{
+            repeat: 0,
+            alpha_map: 0,
+            alpha_x_origin: 0,
+            alpha_y_origin: 0,
+            clip_x_origin: 0,
+            clip_y_origin: 0,
+            clip_mask: 0,
+            graphics_exposures: 0,
+            subwindow_mode: IncludeInferiors as c_int,
+            poly_edge: 0,
+            poly_mode: 0,
+            dither: 0,
+            component_alpha: 0
+        })
     };
+    unsafe {
+        XSync(display, 0);
+    }
 
     // set picture transform
     unsafe {
-        XRenderSetPictureTransform(display, picture, &mut transform);
+        XRenderSetPictureTransform(display, picture, &mut XTransform {
+            matrix: [
+                [1.0 as XFixed, 0.0 as XFixed, 0.0 as XFixed],
+                [0.0 as XFixed, 1.0 as XFixed, 0.0 as XFixed],
+                [0.0 as XFixed, 0.0 as XFixed, divide_factor as XFixed]
+            ]
+        });
     }
+    unsafe {
+        XSync(display, 0);
+    }
+
 
     // get picture of desktop
     let picture_desktop = unsafe {
-        XRenderCreatePicture(display, desktop, pict_format, 0, null_mut())
+        XRenderCreatePicture(display, desktop, pict_format, CPSubwindowMode as c_ulong, &XRenderPictureAttributes{
+            repeat: 0,
+            alpha_map: 0,
+            alpha_x_origin: 0,
+            alpha_y_origin: 0,
+            clip_x_origin: 0,
+            clip_y_origin: 0,
+            clip_mask: 0,
+            graphics_exposures: 0,
+            subwindow_mode: IncludeInferiors as c_int,
+            poly_edge: 0,
+            poly_mode: 0,
+            dither: 0,
+            component_alpha: 0
+        })
     };
+    unsafe {
+        XSync(display, 0);
+    }
 
     // copy picture to desktop
     unsafe {
         XRenderComposite(display, PictOpSrc as c_int, picture, 0, picture_desktop,
                          0, 0, 0, 0, 0, 0, src_width as c_uint, src_height as c_uint);
+    }
+    unsafe {
+        XSync(display, 0);
     }
 
     // map the window
