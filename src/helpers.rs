@@ -22,8 +22,6 @@ use std::os::raw::c_int;
 use std::ptr;
 use std::ptr::{null, null_mut};
 use libsex::bindings::*;
-use xcb::Connection;
-use xcb::{Xid};
 use crate::CumWindow;
 
 pub fn allow_input_passthrough(display: *mut Display, win: Window, x: i16, y: i16) {
@@ -38,7 +36,7 @@ pub fn allow_input_passthrough(display: *mut Display, win: Window, x: i16, y: i1
 pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, fbconfigs: GLXFBConfig, value: c_int) {
     // now unsafe time!
     unsafe {
-        let pixmap = XCompositeNameWindowPixmap(display, window.window_id.resource_id() as u64);
+        let pixmap = XCompositeNameWindowPixmap(display, window.window_id);
 
         let pixmap_attribs = [ GLX_TEXTURE_TARGET_EXT, GLX_TEXTURE_2D_EXT,
             GLX_TEXTURE_FORMAT_EXT, GLX_TEXTURE_FORMAT_RGBA_EXT,

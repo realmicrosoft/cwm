@@ -1,102 +1,56 @@
 use std::ffi::CStr;
 use std::num::NonZeroU32;
-use std::os::raw::{c_char, c_int, c_long, c_ulong};
+use std::os::raw::{c_char, c_int, c_long, c_uint, c_ulong};
 use std::ptr;
 use std::ptr::{null, null_mut};
-use libsex::bindings::{AllocNone, CWColormap, CWEventMask, ExposureMask, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, InputOutput, ShapeBounding, ShapeInput, Window, XCreateColormap, XCreateWindow, XDefaultRootWindow, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XGetErrorText, XOpenDisplay, XReparentWindow, XRootWindow, XSetErrorHandler, XSetWindowAttributes, XVisualIDFromVisual, XVisualInfo};
+use libsex::bindings::{_XImage_funcs, AllocNone, CompositeRedirectManual, CopyFromParent, CWColormap, CWEventMask, Display, ExposureMask, GL_FALSE, GLfloat, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetVisualFromFBConfig, glXMakeCurrent, InputOutput, LSBFirst, PictOpSrc, Screen, ShapeBounding, ShapeInput, Visual, Window, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCreateColormap, XCreatePixmap, XCreateWindow, XDefaultRootWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XGetErrorText, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderFindVisualFormat, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSetErrorHandler, XSetWindowAttributes, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
 use stb_image::image::LoadResult;
-use xcb::{composite, Connection, x, Xid};
 use crate::{allow_input_passthrough, fr, rgba_to_bgra};
 
-pub fn setup_compositing(conn: &Connection, root: xcb::x::Window) -> (xcb::x::Window, xcb::render::Pictformat) {
-    // query version of composite extension so that we get a panic early on if it's not available
-    conn.send_request(&xcb::composite::QueryVersion {
-        client_major_version: 1,
-        client_minor_version: 0,
-    });
-
+pub fn setup_compositing(display: *mut Display, root: Window) -> (Window) {
     // redirect subwindows of root window
-    let cookie = conn.send_request_checked(&xcb::composite::RedirectSubwindows {
-        window: root,
-        update: composite::Redirect::Automatic,
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error redirecting subwindows, is another window manager running?");
+    unsafe {
+        XCompositeRedirectSubwindows(display, root, CompositeRedirectManual as c_int);
     }
 
-    // get pictformat
-    let pict_format_cookie = conn.send_request(&xcb::render::QueryPictFormats {});
-    let pict_format_reply = conn.wait_for_reply(pict_format_cookie);
-    // go through all pictformats to find a suitable one
-    let mut pict_format: xcb::render::Pictformat = xcb::render::Pictformat::none();
-    for pict_format_reply in pict_format_reply.unwrap().formats() {
-        if pict_format_reply.depth() == 24 {
-            pict_format = pict_format_reply.id();
-            break;
-        }
-    }
-
-    // enable bigreq extension
-    let cookie = conn.send_request(&xcb::bigreq::Enable {});
-
-    let reply = conn.wait_for_reply(cookie);
-    if reply.is_err() {
-        println!("Error enabling bigreq extension");
-    }
-    // check maximum request size
-    println!("Maximum request size: {}", reply.unwrap().maximum_request_length());
+    // enable bigreq extension todo: check if this is needed
 
    // get overlay window
-    let cookie = conn.send_request(&xcb::composite::GetOverlayWindow {
-        window: root,
-    });
-
-    let reply = conn.wait_for_reply(cookie);
-    if reply.is_err() {
-        println!("Error getting overlay window");
+    let mut overlay_window: Window = 0;
+    unsafe {
+        overlay_window = XCompositeGetOverlayWindow(display, root);
     }
+    if overlay_window == 0 {
+        panic!("Could not get overlay window");
+    }
+    allow_input_passthrough(display, overlay_window, 0, 0);
 
-    let overlay_window = reply.unwrap().overlay_win();
-
-    // get overlay picture
-    let r_id = conn.generate_id();
-    conn.send_request(&xcb::render::CreatePicture {
-        pid: r_id,
-        drawable: x::Drawable::Window(overlay_window),
-        format: pict_format,
-        value_list: &[
-            xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
-        ],
-    });
-
-    (overlay_window, pict_format)
+    overlay_window
 }
 
-pub fn setup_desktop(conn: &Connection, visual: xcb::x::Visualid,
-                     pict_format:xcb::render::Pictformat,
-                     g_context: x::Gcontext, root: xcb::x::Window,
-                     src_width: u16, src_height: u16) -> (x::Window){
-    // create new window for desktop
-    let desktop_id = conn.generate_id();
-    conn.send_request(&x::CreateWindow {
-        depth: x::COPY_FROM_PARENT as u8,
-        wid: desktop_id,
-        parent: root,
-        x: 0,
-        y: 0,
-        width: src_width,
-        height: src_height,
-        border_width: 0,
-        class: x::WindowClass::InputOutput,
-        visual,
-        value_list: &[
-            x::Cw::EventMask(x::EventMask::EXPOSURE),
-        ],
-    });
+pub fn setup_desktop(display: *mut Display, screen: *mut Screen, visual: *mut Visual,root: Window,
+                     src_width: u16, src_height: u16) -> Window{
 
-    conn.flush().expect("Could not flush");
+    let desktop = unsafe { XCreateWindow(display,  root,
+                                         0, 0,
+                                         src_width as c_uint, src_height as c_uint,
+                                         0, CopyFromParent as c_int, InputOutput, visual, 0, &mut XSetWindowAttributes {
+            background_pixmap: 0,
+            background_pixel: 0,
+            border_pixmap: 0,
+            border_pixel: 0,
+            bit_gravity: 0,
+            win_gravity: 0,
+            backing_store: 0,
+            backing_planes: 0,
+            backing_pixel: 0,
+            save_under: 0,
+            event_mask: ExposureMask as c_long,
+            do_not_propagate_mask: 0,
+            override_redirect: 0,
+            colormap: 0,
+            cursor: 0
+        }) };
 
     // load the bg.png image
     let bg_image_load = stb_image::image::load("bg.png");
@@ -146,113 +100,91 @@ pub fn setup_desktop(conn: &Connection, visual: xcb::x::Visualid,
 
     alpha_mul_div.divide_alpha_inplace(&mut dst_view).unwrap();
 
-    let bg_image_data = dst_image.buffer();
+    let mut bg_image_data = dst_image.buffer();
 
     // create a pixmap to draw on
-    let bg_id = conn.generate_id();
-    let cookie = conn.send_request_checked(&xcb::x::CreatePixmap {
-        depth: 24,
-        pid: bg_id,
-        drawable: x::Drawable::Window(desktop_id),
-        width: (src_width / divide_factor) as u16,
-        height: (src_height / divide_factor) as u16,
-    });
+    let pixmap = unsafe {
+        XCreatePixmap(display, desktop,
+                      src_width as c_uint, src_height as c_uint,
+                      CopyFromParent as c_uint)
+    };
 
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error creating pixmap");
-        println!("{:?}", checked);
+    let mut image: XImage = XImage{
+        width: src_width as c_int,
+        height: src_height as c_int,
+        xoffset: 0,
+        format: ZPixmap as c_int,
+        data: bg_image_data.as_mut_ptr() as *mut c_char,
+        byte_order: LSBFirst as c_int,
+        bitmap_unit: 32,
+        bitmap_bit_order: LSBFirst as c_int,
+        bitmap_pad: ZPixmap as c_int,
+        depth: 24,
+        bytes_per_line: 0,
+        bits_per_pixel: 32,
+        red_mask: 0, // suspicious
+        green_mask: 0, // point of the mask
+        blue_mask: 0, // i don't have a joke for this one
+        obdata: null_mut(),
+        f: _XImage_funcs {
+            create_image: None,
+            destroy_image: None,
+            get_pixel: None,
+            put_pixel: None,
+            sub_image: None,
+            add_pixel: None
+        }
+    };
+    unsafe {
+        XInitImage(&mut image);
     }
 
     // put the image on the pixmap
-    let cookie = conn.send_request_checked(&xcb::x::PutImage {
-        drawable: x::Drawable::Pixmap(bg_id),
-        gc: g_context,
-        width: (src_width / divide_factor) as u16,
-        height: (src_height / divide_factor) as u16,
-        dst_x: 0,
-        dst_y: 0,
-        left_pad: 0,
-        depth: 24,
-        format: x::ImageFormat::ZPixmap,
-        data: &rgba_to_bgra(bg_image_data),
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error putting image on pixmap");
-        println!("{:?}", checked);
+    unsafe {
+        XPutImage(display, pixmap, (*screen).default_gc, &mut image, 0, 0, 0, 0, src_width as c_uint, src_height as c_uint);
     }
 
     // calculate the amount of times to multiply the image by
-    let transform = [
-        1, 0, 0,
-        0, 1, 0,
-        0, 0, divide_factor as i32,
-    ];
+    let mut transform: XTransform = XTransform {
+        matrix: [
+            [1.0 as XFixed, 0.0 as XFixed, 0.0 as XFixed],
+            [0.0 as XFixed, 1.0 as XFixed, 0.0 as XFixed],
+            [0.0 as XFixed, 0.0 as XFixed, divide_factor as XFixed]
+        ]
+    };
+
+    // get pictformat
+    let pict_format = unsafe {
+        XRenderFindVisualFormat(display, visual)
+    };
 
     // create picture from pixmap
-    let pic_id = conn.generate_id();
-    let cookie = conn.send_request_checked(&xcb::render::CreatePicture {
-        pid: pic_id,
-        drawable: x::Drawable::Pixmap(bg_id),
-        format: pict_format,
-        value_list: &[],
-    });
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error creating picture");
-    }
+    let picture = unsafe {
+        XRenderCreatePicture(display, pixmap, pict_format, 0, null_mut())
+    };
 
     // set picture transform
-    let cookie = conn.send_request_checked(&xcb::render::SetPictureTransform {
-        picture: pic_id,
-        transform: xcb::render::Transform {
-            matrix11: transform[0],
-            matrix12: transform[1],
-            matrix13: transform[2],
-            matrix21: transform[3],
-            matrix22: transform[4],
-            matrix23: transform[5],
-            matrix31: transform[6],
-            matrix32: transform[7],
-            matrix33: transform[8],
-        },
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error setting picture transform");
+    unsafe {
+        XRenderSetPictureTransform(display, picture, &mut transform);
     }
 
-    // get picture of window
-    let desktop_pic_id = conn.generate_id();
-    let cookie = conn.send_request_checked(&xcb::render::CreatePicture {
-        pid: desktop_pic_id,
-        drawable: x::Drawable::Window(desktop_id),
-        format: pict_format,
-        value_list: &[],
-    });
+    // get picture of desktop
+    let picture_desktop = unsafe {
+        XRenderCreatePicture(display, desktop, pict_format, 0, null_mut())
+    };
 
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error creating picture");
+    // copy picture to desktop
+    unsafe {
+        XRenderComposite(display, PictOpSrc as c_int, picture, 0, picture_desktop,
+                         0, 0, 0, 0, 0, 0, src_width as c_uint, src_height as c_uint);
     }
 
     // map the window
-    let cookie = conn.send_request_checked(&xcb::x::MapWindow {
-        window: desktop_id,
-    });
-
-    let checked = conn.check_request(cookie);
-    if checked.is_err() {
-        println!("Error mapping window");
+    unsafe {
+        XMapWindow(display, desktop);
     }
 
-    // flush all requests
-    conn.flush().expect("Error flushing");
-
-    desktop_id
+    desktop
 }
 
 unsafe extern "C" fn error_handler(display: *mut libsex::bindings::Display, error_event: *mut libsex::bindings::XErrorEvent) -> c_int {
@@ -264,7 +196,7 @@ unsafe extern "C" fn error_handler(display: *mut libsex::bindings::Display, erro
     0
 }
 
-pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen: i32)
+pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen: *mut Screen)
     -> (GLXContext, *mut libsex::bindings::Display, *mut libsex::bindings::XVisualInfo, libsex::bindings::GLXFBConfig,
     c_int) {
     XSetErrorHandler(Some(error_handler));
@@ -287,7 +219,7 @@ pub unsafe fn setup_glx(overlay: Window, src_width: u32, src_height: u32, screen
     glViewport(0, 0, src_width as i32, src_height as i32);
 
     let mut nfbconfigs = 10;
-    let fbconfigs = glXGetFBConfigs(display, screen, &mut nfbconfigs);
+    let fbconfigs = glXGetFBConfigs(display, XScreenNumberOfScreen(screen), &mut nfbconfigs);
     if fbconfigs.is_null() {
         panic!("Could not get fbconfigs");
     }
