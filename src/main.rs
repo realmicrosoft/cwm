@@ -10,7 +10,7 @@ use stb_image::image::LoadResult;
 use fast_image_resize as fr;
 use xcb::{composite, Connection, glx, x, Xid};
 use crate::types::CumWindow;
-use crate::helpers::{allow_input_passthrough, glx_pixmap_from_x, rgba_to_bgra};
+use crate::helpers::{allow_input_passthrough, create_sdl2_context, draw_x_window, rgba_to_bgra};
 use crate::setup::{setup_compositing, setup_desktop};
 
 fn redraw_desktop(conn: &Connection, pic_id: xcb::render::Picture, desktop_pic_id: xcb::render::Picture, src_width: u16, src_height: u16) {
@@ -171,6 +171,9 @@ fn main() {
         println!("Error grabbing pointer");
     }
 
+    // scary part!
+    let (ctx, window, _no, _context) = unsafe { create_sdl2_context(src_width, src_height) };
+
     conn.flush().expect("flush failed!");
 
     let mut now = SystemTime::now();
@@ -178,6 +181,19 @@ fn main() {
     let mut need_redraw = true;
     let mut window_active = 0;
     let mut dragging = false;
+
+    let mut desktop_window = CumWindow {
+        x: 0,
+        y: 0,
+        width: src_width,
+        height: src_height,
+        window_id: desktop_id,
+        frame_id: xcb::x::Window::none(),
+        is_opening: false,
+        animation_time: 0
+    };
+
+    let mut sdl_window_id: Option<x::Window> = None;
 
     let mut cursor_x = 0;
     let mut cursor_y = 0;
@@ -194,72 +210,74 @@ fn main() {
                         if root != ev.parent() || desktop_id == ev.window() {
                             println!("nevermind, it is root or desktop");
                         } else {
-                            // check if this is a frame window
-                            let mut found = false;
-                            for w in windows.clone().iter() {
-                                if w.frame_id == ev.window() {
-                                    println!("nevermind, it is a frame");
-                                    found = true;
-                                    break;
+                            // check if we've gotten the sdl window yet
+                            let mut found_sdl = false;
+                            if sdl_window_id.is_none() {
+                                // check if this window has a width and height equal to the screen
+                                if ev.width() == src_width && ev.height() == src_height {
+                                    // if so, set the sdl window id to this window
+                                    sdl_window_id = Some(ev.window());
+                                    println!("sdl window id set to {:?}", ev.window());
+                                    found_sdl = true;
                                 }
                             }
-                            if !found {
-                                let centre_x = (src_width / 2) - (ev.width() / 2);
-                                let centre_y = (src_height / 2) - (ev.height() / 2);
-                                // change the main window to be in the centre of the screen
-                                conn.send_request(&xcb::x::ConfigureWindow {
-                                    window: ev.window(),
-                                    value_list: &[
-                                        x::ConfigWindow::X(centre_x as i32),
-                                        x::ConfigWindow::Y(centre_y as i32),
-                                    ],
-                                });
-                                conn.flush().expect("flush failed!");
-                                // get pixmap from the window
-                                let pixmap = conn.generate_id();
-                                conn.send_request(&xcb::x::CreatePixmap {
-                                    depth: 24,
-                                    pid: pixmap,
-                                    drawable: x::Drawable::Window(ev.window()),
-                                    width: ev.width(),
-                                    height: ev.height(),
-                                });
-                                let glx_pixmap = glx_pixmap_from_x(&conn, pixmap, screen_num as u32);
-                                // create the frame
-                                let frame_id = conn.generate_id();
-                                conn.send_request(&xcb::x::CreateWindow {
-                                    depth: 24,
-                                    wid: frame_id,
-                                    parent: root,
-                                    x: centre_x as i16,
-                                    y: centre_y as i16 - 10,
-                                    width: ev.width() + 20 as u16,
-                                    height: ev.height() + 20 as u16,
-                                    border_width: 5,
-                                    class: x::WindowClass::InputOutput,
-                                    visual: screen.root_visual(),
-                                    value_list: &[
-                                        x::Cw::BackPixel(screen.white_pixel()),
-                                        x::Cw::EventMask(x::EventMask::BUTTON_PRESS | x::EventMask::BUTTON_RELEASE | x::EventMask::EXPOSURE),
-                                    ],
-                                });
-                                // map the frame
-                                conn.send_request(&xcb::x::MapWindow {
-                                    window: frame_id,
-                                });
-                                conn.flush().expect("flush failed!");
-                                windows.push(CumWindow {
-                                    window_id: ev.window(),
-                                    frame_id,
-                                    pixmap_id: glx_pixmap,
-                                    x: centre_x as i16,
-                                    y: centre_y as i16,
-                                    width: ev.width(),
-                                    height: ev.height(),
-                                    is_opening: false,
-                                    animation_time: 0,
-                                });
-                                need_redraw = true;
+                            if !found_sdl {
+                                // check if this is a frame window
+                                let mut found = false;
+                                for w in windows.clone().iter() {
+                                    if w.frame_id == ev.window() {
+                                        println!("nevermind, it is a frame");
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                                if !found {
+                                    let centre_x = (src_width / 2) - (ev.width() / 2);
+                                    let centre_y = (src_height / 2) - (ev.height() / 2);
+                                    // change the main window to be in the centre of the screen
+                                    conn.send_request(&xcb::x::ConfigureWindow {
+                                        window: ev.window(),
+                                        value_list: &[
+                                            x::ConfigWindow::X(centre_x as i32),
+                                            x::ConfigWindow::Y(centre_y as i32),
+                                        ],
+                                    });
+                                    conn.flush().expect("flush failed!");
+                                    // create the frame
+                                    let frame_id = conn.generate_id();
+                                    conn.send_request(&xcb::x::CreateWindow {
+                                        depth: 24,
+                                        wid: frame_id,
+                                        parent: root,
+                                        x: centre_x as i16,
+                                        y: centre_y as i16 - 10,
+                                        width: ev.width() + 20 as u16,
+                                        height: ev.height() + 20 as u16,
+                                        border_width: 5,
+                                        class: x::WindowClass::InputOutput,
+                                        visual: screen.root_visual(),
+                                        value_list: &[
+                                            x::Cw::BackPixel(screen.white_pixel()),
+                                            x::Cw::EventMask(x::EventMask::BUTTON_PRESS | x::EventMask::BUTTON_RELEASE | x::EventMask::EXPOSURE),
+                                        ],
+                                    });
+                                    // map the frame
+                                    conn.send_request(&xcb::x::MapWindow {
+                                        window: frame_id,
+                                    });
+                                    conn.flush().expect("flush failed!");
+                                    windows.push(CumWindow {
+                                        window_id: ev.window(),
+                                        frame_id,
+                                        x: centre_x as i16,
+                                        y: centre_y as i16,
+                                        width: ev.width(),
+                                        height: ev.height(),
+                                        is_opening: false,
+                                        animation_time: 0,
+                                    });
+                                    need_redraw = true;
+                                }
                             }
                         }
                     }
@@ -291,32 +309,40 @@ fn main() {
                         if ev.window() == root {
                             src_height = ev.height();
                             src_width = ev.width();
+                            // todo: resize the sdl window
                         }
-                        let mut found = false;
-                        for w in windows.iter_mut() {
-                            if w.window_id == ev.window() {
-                                found = true;
-                                // update frame window position
-                                conn.send_request(&xcb::x::ConfigureWindow {
-                                    window: w.frame_id,
-                                    value_list: &[
-                                        x::ConfigWindow::X(ev.x() as i32 - 10),
-                                        x::ConfigWindow::Y(ev.y() as i32 - 20),
-                                        x::ConfigWindow::Width(ev.width() as u32 + 20),
-                                        x::ConfigWindow::Height(ev.height() as u32 + 20),
-                                    ],
-                                });
-                                w.x = ev.x();
-                                w.y = ev.y();
-                                w.width = ev.width();
-                                w.height = ev.height();
-                                need_redraw = true;
-                                break;
+                        let mut sdl_window_found = false;
+                        // we're being safe (:
+                        #[allow(clippy::collapsible_if)]
+                        if sdl_window_id.is_some() {
+                            if ev.window() == sdl_window_id.unwrap() {
+                                sdl_window_found = true;
                             }
                         }
-                        if !found {
-                            // window not found, ignore
-                            continue;
+
+                        if !sdl_window_found {
+                            let mut found = false;
+                            for w in windows.iter_mut() {
+                                if w.window_id == ev.window() {
+                                    found = true;
+                                    // update frame window position
+                                    conn.send_request(&xcb::x::ConfigureWindow {
+                                        window: w.frame_id,
+                                        value_list: &[
+                                            x::ConfigWindow::X(ev.x() as i32 - 10),
+                                            x::ConfigWindow::Y(ev.y() as i32 - 20),
+                                            x::ConfigWindow::Width(ev.width() as u32 + 20),
+                                            x::ConfigWindow::Height(ev.height() as u32 + 20),
+                                        ],
+                                    });
+                                    w.x = ev.x();
+                                    w.y = ev.y();
+                                    w.width = ev.width();
+                                    w.height = ev.height();
+                                    need_redraw = true;
+                                    break;
+                                }
+                            }
                         }
                     }
                     xcb::Event::X(x::Event::Expose(ev)) => {
@@ -325,8 +351,8 @@ fn main() {
                             window: ev.window(),
                         });
                         // if desktop window, copy pixmap to window
-                        if ev.window() == desktop_id {
-                            redraw_desktop(&conn, pic_id, desktop_pic_id, src_width, src_height);
+                        if ev.window() == desktop_id && sdl_window_id.is_some(){
+                            draw_x_window(&conn, desktop_window, &ctx);
                         }
                         conn.flush().expect("Error flushing");
                         need_redraw = true;
@@ -334,16 +360,14 @@ fn main() {
                     xcb::Event::X(x::Event::ButtonPress(ev)) => {
                         if ev.detail() == 1 {
                             // left click
-                            let mut tmp = 0;
                             if ev.event() == root {
                                 continue;
                             }
-                            for w in windows.iter_mut() {
+                            for (tmp, w) in windows.iter_mut().enumerate() {
                                 if w.window_id == ev.event() {
                                     println!("{}", tmp);
                                     break;
                                 }
-                                tmp += 1;
                             }
                         }
                     },
@@ -372,22 +396,10 @@ fn main() {
             if need_redraw {
                 conn.flush().expect("Error flushing");
 
-                // get desktop pixmap
-                // get pixmap from the window
-                let pixmap = conn.generate_id();
-                conn.send_request(&xcb::x::CreatePixmap {
-                    depth: 24,
-                    pid: pixmap,
-                    drawable: x::Drawable::Window(desktop_id),
-                    width: src_width,
-                    height: src_height,
-                });
-                let d_id = glx_pixmap_from_x(&conn, pixmap, screen_num as u32);
-
                 // draw the desktop
+                draw_x_window(&conn, desktop_window, &ctx);
 
 
-                // for each window, move it by 1 up and 1 right
                 for w in windows.iter_mut() {
                     // set the window's border color
                     conn.send_request(&x::ChangeWindowAttributes {
@@ -398,76 +410,12 @@ fn main() {
                     });
 
                     conn.flush().expect("Error flushing");
-                    // get window pixmap
-                    let p_id = conn.generate_id();
-                    conn.send_request(&xcb::render::CreatePicture {
-                        pid: p_id,
-                        drawable: x::Drawable::Window(w.window_id),
-                        format: pict_format,
-                        value_list: &[
-                            xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
-                        ],
-                    });
-                    // get frame pixmap
-                    let f_id = conn.generate_id();
-                    conn.send_request(&xcb::render::CreatePicture {
-                        pid: f_id,
-                        drawable: x::Drawable::Window(w.frame_id),
-                        format: pict_format,
-                        value_list: &[
-                            xcb::render::Cp::SubwindowMode(xcb::x::SubwindowMode::IncludeInferiors),
-                        ],
-                    });
-                    // composite the frame
-                    conn.send_request(&xcb::render::Composite {
-                        op: xcb::render::PictOp::Over,
-                        src: f_id,
-                        mask: xcb::render::Picture::none(),
-                        dst: r_id,
-                        src_x: -5,
-                        src_y: -5,
-                        mask_x: 0,
-                        mask_y: 0,
-                        dst_x: w.x - 10 - 5,
-                        dst_y: w.y - 20 - 5,
-                        width: w.width as u16 + 20 + 10,
-                        height: w.height as u16 + 20 + 10,
-                    });
 
-                    // composite render pixmap onto window
-                    if desktop_id != w.window_id {
-                        conn.send_request(&xcb::render::Composite {
-                            op: xcb::render::PictOp::Over,
-                            src: p_id,
-                            mask: xcb::render::Picture::none(),
-                            dst: r_id,
-                            src_x: -1,
-                            src_y: -1,
-                            mask_x: 0,
-                            mask_y: 0,
-                            dst_x: w.x - 1,
-                            dst_y: w.y - 1,
-                            width: w.width as u16 + 2,
-                            height: w.height as u16 + 2,
-                        });
-                    } else {}
+                    // draw the window
+                    draw_x_window(&conn, *w, &ctx);
                 }
 
-                // composite cursor onto root
-                conn.send_request(&xcb::render::Composite {
-                    op: xcb::render::PictOp::Over,
-                    src: cursor_image,
-                    mask: xcb::render::Picture::none(),
-                    dst: r_id,
-                    src_x: 0,
-                    src_y: 0,
-                    mask_x: 0,
-                    mask_y: 0,
-                    dst_x: cursor_x,
-                    dst_y: cursor_y,
-                    width: 16 as u16,
-                    height: 16 as u16,
-                });
+                window.gl_swap_window();
 
                 conn.flush().expect("Error flushing");
                 now = after;

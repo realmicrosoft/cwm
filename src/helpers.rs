@@ -59,7 +59,7 @@ pub fn allow_input_passthrough(conn: &Connection, window: xcb::x::Window, p_id: 
 use rogl::gl::gl45::GL45;
 use rogl::types::{GLboolean, GLfloat, GLint, GLsizei, GLsizeiptr, GLuint, GLvoid};
 
-trait GL: GL45 {}
+pub trait GL: GL45 {}
 impl GL for GLContext {}
 
 pub fn draw_x_window<T>(conn: &Connection, window: CumWindow, ctx: &T) where T: GL {
@@ -83,7 +83,8 @@ pub fn draw_x_window<T>(conn: &Connection, window: CumWindow, ctx: &T) where T: 
         });
 
         let reply = conn.wait_for_reply(cookie);
-        let image = reply.unwrap().data();
+        let reply = reply.unwrap();
+        let image = reply.data();
         let image_vec: Vec<u8> = Vec::from(image);
 
 
@@ -116,8 +117,6 @@ pub fn draw_x_window<T>(conn: &Connection, window: CumWindow, ctx: &T) where T: 
         ctx.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE as GLboolean, 0, std::ptr::null());
 
         // draw
-        ctx.glBindVertexArray(vao_buffers[0]);
-        ctx.glBindTexture(GL_TEXTURE_2D, texture);
         ctx.glDrawArrays(GL_QUADS, 0, 4);
         ctx.glDeleteVertexArrays(1, &mut vao_buffers[0]);
         ctx.glDeleteBuffers(1, &mut vbo_buffers[0]);
