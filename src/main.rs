@@ -8,7 +8,7 @@ use std::os::raw::{c_ulong};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use libsex::bindings::{GL_COLOR_BUFFER_BIT, glClear, glClearColor, glXSwapBuffers};
+use libsex::bindings::{GL_COLOR_BUFFER_BIT, GL_PROJECTION, glClear, glClearColor, glLoadIdentity, glMatrixMode, glOrtho, glViewport, glXSwapBuffers};
 use xcb::{composite, Connection, glx, x, Xid};
 use crate::types::CumWindow;
 use crate::helpers::{allow_input_passthrough, draw_x_window, rgba_to_bgra};
@@ -282,10 +282,6 @@ fn main() {
                         conn.send_request(&x::MapWindow {
                             window: ev.window(),
                         });
-                        // if desktop window, copy pixmap to window
-                        if ev.window() == desktop_id {
-                            draw_x_window(&conn, desktop_window, display, visual, fbconfigs);
-                        }
                         conn.flush().expect("Error flushing");
                         need_redraw = true;
                     }
@@ -323,10 +319,14 @@ fn main() {
                 unsafe {
                     glClearColor(0.29, 0.19, 0.3, 1.0);
                     glClear(GL_COLOR_BUFFER_BIT);
+
+                    glMatrixMode(GL_PROJECTION);
+                    glLoadIdentity();
+                    glOrtho(0.0, src_width as f64, src_height as f64, 0.0, -1.0, 1.0);
                 }
 
                 // draw the desktop
-                draw_x_window(&conn, desktop_window, display, visual, fbconfigs);
+                draw_x_window(desktop_window, display, visual, fbconfigs);
 
                 let mut el = windows.index(0);
                 let mut i = 0;
@@ -376,7 +376,7 @@ fn main() {
                         conn.flush().expect("Error flushing");
 
                         // draw the window
-                        draw_x_window(&conn, w, display, visual, fbconfigs);
+                        draw_x_window(w, display, visual, fbconfigs);
 
                         el = windows.next_element(el.unwrap());
                         i += 1;
