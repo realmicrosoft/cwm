@@ -18,7 +18,7 @@ pub fn setup_compositing(display: *mut Display, root: Window) -> (Window, GC) {
     }
     // redirect subwindows of root window
     unsafe {
-        XCompositeRedirectSubwindows(display, root, CompositeRedirectAutomatic as c_int);
+        XCompositeRedirectSubwindows(display, root, CompositeRedirectManual as c_int);
     }
     // enable events
     unsafe {

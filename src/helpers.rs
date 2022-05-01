@@ -160,7 +160,7 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
         let width = attribs.width;
         let height = attribs.height;
 
-        println!("{} {}", width, height);
+        //println!("{} {}", width, height);
 
         let xim = XGetImage(display, window_id,
                             0, 0,
@@ -226,8 +226,7 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
 
         glEnd();
 
-
         glDeleteTextures(1, &texture);
-        XFree(xim as *mut c_void);
+        XDestroyImage(xim);
     }
 }

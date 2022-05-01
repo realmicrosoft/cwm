@@ -140,6 +140,7 @@ fn main() {
     let mut windows_to_destroy: Vec<Window> = Vec::new();
     let mut windows_to_configure: Vec<CumWindow> = Vec::new();
     let mut windows_to_open: Vec<Window> = Vec::new();
+    let mut windows_to_hide: Vec<Window> = Vec::new();
 
     let mut r= 0.0f64;
     let mut g= 0.0f64;
@@ -190,7 +191,6 @@ void main()
 gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
 }
                 }";
-        /*
         glCreateShader(GL_VERTEX_SHADER);
         glShaderSource(GL_VERTEX_SHADER, 1, vertex_source.as_ptr() as *const *const c_char, null());
         glCompileShader(GL_VERTEX_SHADER);
@@ -207,7 +207,6 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
         let position_loc = glGetAttribLocation(shader_program, "position".as_ptr() as *const i8);
         let color_loc = glGetAttribLocation(shader_program, "color".as_ptr() as *const i8);
         let texcoord_loc = glGetAttribLocation(shader_program, "texcoord".as_ptr() as *const i8);
-        let tex_loc = glGetUniformLocation(shader_program, "tex".as_ptr() as *const i8);
 
         let mut vao = 0;
         glGenVertexArrays(1, &mut vao);
@@ -235,7 +234,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
         ];
 
         glBufferData(GL_ARRAY_BUFFER, (mem::size_of::<f32>() * texture_coords.len() as usize) as GLsizeiptr, texture_coords.as_ptr() as *const c_void, GL_STATIC_DRAW);
-*/
+
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         glOrtho(-1.25, 1.25, -1.25, 1.25, 1.0, 20.0);
@@ -246,6 +245,9 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
 
     loop {
         //println!("loop");
+        unsafe {
+            XFlush(display);
+        }
         let events_pending = unsafe { XEventsQueued(display, QueuedAlready as c_int) };
         // if we have an event
         if events_pending > 0 {
@@ -353,17 +355,20 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                         });
                         need_redraw = true;
                     }
-                    Expose => {
-                        // map window
-                        unsafe {
-                            let ev = event.xexpose;
-                            XMapWindow(display, ev.window);
-                        }
+                    MapNotify => {
                         // add to windows to open
-                        windows_to_open.push(event.xexpose.window);
+                        println!("map notify");
+                        windows_to_open.push(event.xmap.window);
 
                         need_redraw = true;
-                    }
+                    },
+                    UnmapNotify => {
+                        // add to windows to close
+                        println!("unmap notify");
+                        windows_to_hide.push(event.xunmap.window);
+
+                        need_redraw = true;
+                    },
                     ButtonPress => {
                         let ev = event.xbutton;
                         if ev.button == 1 {
@@ -414,7 +419,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
             }
 
             // draw the desktop
-            draw_x_window(desktop_window, display, visual, value, shader_program);
+            //draw_x_window(desktop_window, display, visual, value, shader_program);
 
             let mut el = windows.index(0);
             let mut i = 0;
@@ -431,14 +436,11 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                 let mut w = unsafe { (*el.unwrap()).value };
                 // if we need to destroy this window, do so
                 if windows_to_destroy.contains(&w.window_id) {
-                    unsafe {
-                        XDestroyWindow(display, w.window_id);
-                    }
                     windows.remove_at_index(i).expect("Error removing window");
                     el = windows.index(0);
                     i = 0;
                 } else if windows_to_configure.contains(&w) {
-                    unsafe {
+                    /*unsafe {
                         XConfigureWindow(display, w.window_id, CWX|CWY|CWWidth|CWHeight, &mut XWindowChanges{
                             x: w.x as c_int,
                             y: w.y as c_int,
@@ -449,12 +451,16 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                             stack_mode: 0
                         });
                     }
+                     */
                     windows_to_configure.retain(|x| x != &w);
                     el = windows.index(0);
                     i = 0;
                 } else if windows_to_open.contains(&w.window_id) {
                     unsafe { (*el.unwrap()).value.is_opening = true; }
                     windows_to_open.retain(|x| x != &w.window_id);
+                } else if windows_to_hide.contains(&w.window_id) {
+                    unsafe { (*el.unwrap()).value.is_opening = false; }
+                    windows_to_hide.retain(|x| x != &w.window_id);
                 } else {
                     // set the window's border color
                     unsafe {
@@ -486,6 +492,13 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                     i += 1;
                 }
             }
+
+            // all events should have been dealt with by now
+            // clear the arrays
+            windows_to_destroy.clear();
+            windows_to_configure.clear();
+            windows_to_open.clear();
+            windows_to_hide.clear();
 
             unsafe {
                 glXSwapBuffers(display, overlay_window);
