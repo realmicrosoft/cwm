@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use std::os::raw::{c_char, c_int, c_long, c_uint, c_ulong};
 use std::{mem, ptr};
 use std::ptr::{null, null_mut};
-use libsex::bindings::{_XImage_funcs, _XTransform, AllocNone, CompositeRedirectAutomatic, CompositeRedirectManual, CopyFromParent, CPSubwindowMode, CWColormap, CWEventMask, Display, ExposureMask, GC, GL_FALSE, GLbyte, GLfloat, GLubyte, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, GLXDrawable, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetProcAddress, glXGetProcAddressARB, glXGetVisualFromFBConfig, glXMakeCurrent, IncludeInferiors, InputOutput, LSBFirst, PictFormat, PictOpSrc, PropertyChangeMask, Screen, ShapeBounding, ShapeInput, StructureNotifyMask, SubstructureNotifyMask, SubstructureRedirectMask, Visual, VisualNoMask, Window, X_RenderQueryPictFormats, XChangeWindowAttributes, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultDepth, XDefaultDepthOfScreen, XDefaultRootWindow, XDefaultVisual, XDefaultVisualOfScreen, XDestroyWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XFree, XFreePixmap, XGetErrorText, XGetVisualInfo, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderDirectFormat, XRenderFindVisualFormat, XRenderPictFormat, XRenderPictureAttributes, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSelectInput, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
+use libsex::bindings::{_XImage_funcs, _XTransform, AllocNone, CompositeRedirectAutomatic, CompositeRedirectManual, CopyFromParent, CPSubwindowMode, CWColormap, CWEventMask, Display, ExposureMask, GC, GL_FALSE, GLbyte, GLfloat, GLubyte, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, GLXDrawable, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetProcAddress, glXGetProcAddressARB, glXGetVisualFromFBConfig, glXMakeCurrent, IncludeInferiors, InputOutput, LSBFirst, PictFormat, PictOpSrc, PropertyChangeMask, Screen, ShapeBounding, ShapeInput, StructureNotifyMask, SubstructureNotifyMask, SubstructureRedirectMask, Visual, VisualNoMask, Window, X_RenderQueryPictFormats, XChangeWindowAttributes, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultDepth, XDefaultDepthOfScreen, XDefaultRootWindow, XDefaultVisual, XDefaultVisualOfScreen, XDestroyWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XFlush, XFree, XFreePixmap, XGetErrorText, XGetVisualInfo, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderDirectFormat, XRenderFindVisualFormat, XRenderPictFormat, XRenderPictureAttributes, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSelectInput, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
 use stb_image::image::LoadResult;
 use crate::{allow_input_passthrough, fr, get_window_fb_config, rgba_to_bgra};
 
@@ -22,7 +22,7 @@ pub fn setup_compositing(display: *mut Display, root: Window) -> (Window, GC) {
     }
     // enable events
     unsafe {
-        XSelectInput(display, root, (SubstructureNotifyMask | SubstructureRedirectMask) as c_long);
+        XSelectInput(display, root, (SubstructureNotifyMask) as c_long);
     }
 
     // enable bigreq extension todo: check if this is needed
@@ -129,7 +129,7 @@ pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_fo
     let mut pixmap = unsafe {
         XCreatePixmap(display, desktop,
                       src_width as c_uint, src_height as c_uint,
-                      XDefaultDepthOfScreen(screen) as c_uint)
+                      24 as c_uint)
     };
 
     unsafe {
@@ -138,17 +138,18 @@ pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_fo
 
     let mut img: *mut XImage = unsafe { mem::zeroed() };
 
-    let data = rgba_to_bgra(&bg_image_vec).as_mut_ptr() as *mut c_char;
+    let mut data = rgba_to_bgra(&bg_image_vec);
 
     img = unsafe {
         XCreateImage(display, XDefaultVisualOfScreen(screen), 24, ZPixmap as c_int, 0,
-                     data,
+                     data.as_mut_ptr() as *mut c_char,
                      dst_width.get(), dst_height.get(), 32, 0)
     };
 
     unsafe {
         XSync(display, 0);
     }
+
 
     unsafe {
         XInitImage(img);
@@ -160,7 +161,7 @@ pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_fo
     // put the image on the pixmap
     unsafe {
         XPutImage(display, pixmap, gc, img, 0, 0, 0, 0,
-                  dst_width.get() as c_uint, dst_height.get() as c_uint);
+                  dst_width.get(), dst_height.get());
     }
     unsafe {
         XSync(display, 0);
@@ -263,7 +264,7 @@ unsafe fn XDestroyImage(p0: *mut XImage) {
 
 pub unsafe fn setup_glx(display: *mut Display, overlay: Window, src_width: u32, src_height: u32, screen: *mut Screen)
     -> (GLXContext, *mut XVisualInfo, libsex::bindings::GLXFBConfig,
-    c_int, *mut XRenderPictFormat) { //, (extern "C" fn(*mut Display, GLXDrawable, c_int, *mut c_int), extern "C" fn(*mut Display, GLXDrawable, c_int))) {
+    c_int, *mut XRenderPictFormat){//}, (extern "C" fn(*mut Display, GLXDrawable, c_int, *mut c_int), extern "C" fn(*mut Display, GLXDrawable, c_int))) {
     let mut nfbconfigs = 10;
     /*
     let fbconfigs = glXGetFBConfigs(display, XScreenNumberOfScreen(screen), &mut nfbconfigs);
@@ -284,7 +285,7 @@ pub unsafe fn setup_glx(display: *mut Display, overlay: Window, src_width: u32, 
     };
 
 
-    let ctx = glXCreateContext(display, visinfo, null_mut(), 0);
+    let ctx = glXCreateContext(display, visinfo, null_mut(), 1);
     if ctx.is_null() {
         panic!("Could not create context");
     }
@@ -294,12 +295,12 @@ pub unsafe fn setup_glx(display: *mut Display, overlay: Window, src_width: u32, 
 
     // i'm crying
     /*let tex_from_img = unsafe {
-        let proc_address = glXGetProcAddressARB(b"glXBindTexImageEXT\0".as_ptr() as *const GLubyte).unwrap() as *mut c_void;
+        let proc_address = glXGetProcAddress(b"glXBindTexImageEXT\0".as_ptr() as *const GLubyte).unwrap() as *mut c_void;
         if proc_address.is_null() {
             panic!("glXBindTexImageEXT not found/supported");
         }
         let funny1 = mem::transmute::<*mut c_void, extern "C" fn(*mut Display, GLXDrawable, c_int, *mut c_int)>(proc_address as *mut c_void);
-        let proc_address = glXGetProcAddressARB(b"glXReleaseTexImageEXT\0".as_ptr() as *const GLubyte).unwrap() as *mut c_void;
+        let proc_address = glXGetProcAddress(b"glXReleaseTexImageEXT\0".as_ptr() as *const GLubyte).unwrap() as *mut c_void;
         if proc_address.is_null() {
             panic!("glXReleaseTexImageEXT not found/supported");
         }

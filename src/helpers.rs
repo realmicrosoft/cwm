@@ -64,12 +64,14 @@ pub unsafe fn get_window_fb_config(window: Window, display: *mut Display, screen
     let mut visinfo: *mut XVisualInfo = null_mut();
     let mut wanted_config = 0;
     let mut value: c_int = 0;
-    let mut nfbconfigs = 10;
-    let fbconfigs = glXGetFBConfigs(display, XScreenNumberOfScreen(screen), &mut nfbconfigs);
+    let mut nfbconfigs: *mut c_int = Box::into_raw(Box::new(0)) as *mut c_int;
+    let fbconfigs = glXGetFBConfigs(display, 0, nfbconfigs);
+    XSync(display, 0);
+    println!("{}", *nfbconfigs);
     if fbconfigs.is_null() {
-        panic!("Could not get fbconfigs");
+        panic!("could not get fbconfigs");
     }
-    for i in 0..nfbconfigs {
+    for i in 0..*nfbconfigs {
         visinfo = glXGetVisualFromFBConfig (display, *fbconfigs.offset(i as isize));
         if visinfo.is_null() || (*visinfo).visualid != visualid as u64 {
             continue;
@@ -101,23 +103,69 @@ pub unsafe fn get_window_fb_config(window: Window, display: *mut Display, screen
         break;
     }
 
+    // consume
+    Box::from_raw(nfbconfigs);
+
+    println!("{}", wanted_config);
+
     *fbconfigs.offset(wanted_config as isize)
 }
 
-pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int) {
+pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint) {
     // now unsafe time!
     unsafe {
         let window_id = window.window_id;
 
-        let pixmap = XCompositeNameWindowPixmap(display, window_id);
+        // get window attribs
+        let mut attribs: XWindowAttributes = XWindowAttributes{
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            border_width: 0,
+            depth: 0,
+            visual: null_mut(),
+            root: 0,
+            class: 0,
+            bit_gravity: 0,
+            win_gravity: 0,
+            backing_store: 0,
+            backing_planes: 0,
+            backing_pixel: 0,
+            save_under: 0,
+            colormap: 0,
+            map_installed: 0,
+            map_state: 0,
+            all_event_masks: 0,
+            your_event_mask: 0,
+            do_not_propagate_mask: 0,
+            override_redirect: 0,
+            screen: null_mut()
+        };
+        XGetWindowAttributes(display, window_id, &mut attribs);
+
+        let width = attribs.width;
+        let height = attribs.height;
+
+        println!("{} {}", width, height);
+
+        let xim = XGetImage(display, window_id,
+                            0, 0,
+                            window.width as c_uint, window.height as c_uint, XAllPlanes(), ZPixmap as c_int);
         XSync(display, 0);
+
+        if xim.is_null() {
+            println!("could not get xim for window {}", window_id);
+            XFree(xim as *mut c_void);
+            return;
+        }
 
         let mut texture: GLuint = 0;
         glEnable(GL_TEXTURE_2D);
         glGenTextures(1, &mut texture);
         glBindTexture(GL_TEXTURE_2D, texture);
-
-        glXBindTexImageEXT(display, pixmap, GLX_FRONT_LEFT_EXT as c_int, null_mut());
+        let loc = glGetUniformLocation(shader_program, "tex".as_ptr() as *const i8);
+        glUniform1i(loc, 0);
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR as GLint);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR as GLint);
@@ -138,7 +186,16 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
         }
         glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE as GLfloat);
 
+        glTexImage2D(GL_TEXTURE_2D, 0,
+                     GL_RGBA8 as GLint, width, height,
+                     0, GL_BGRA,
+                     GL_UNSIGNED_BYTE, (*xim).data as *mut c_void);
 
+        let mut err = glGetError();
+        while err != GL_NO_ERROR {
+            println!("{}", err);
+            err = glGetError();
+        }
 
         glBegin(GL_QUADS);
 
@@ -156,8 +213,8 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
 
         glEnd();
 
-        glXReleaseTexImageEXT(display, pixmap, GLX_FRONT_LEFT_EXT as c_int);
+
         glDeleteTextures(1, &texture);
-        XFreePixmap(display, pixmap);
+        XFree(xim as *mut c_void);
     }
 }
