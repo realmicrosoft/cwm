@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 stb_image = "0.2.4"
 fast_image_resize = "0.8.0"
-libsex = { path = "../libsex" }
+libsex = { path = "../../libsex" }

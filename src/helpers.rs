@@ -17,7 +17,7 @@ pub fn rgba_to_bgra(rgba_array: &[u8]) -> Vec<u8> {
 
 }
 
-use std::ffi::CStr;
+use std::ffi::{c_void, CStr};
 use std::os::raw::{c_int, c_uint, c_ulong};
 use std::{mem, ptr};
 use std::ptr::{null, null_mut};
@@ -108,25 +108,16 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
     // now unsafe time!
     unsafe {
         let window_id = window.window_id;
+
+        let pixmap = XCompositeNameWindowPixmap(display, window_id);
         XSync(display, 0);
 
-        // convert window to pixmap
-        let mut pixmap = XCreatePixmap(display, window_id, window.width as c_uint, window.height as c_uint, 24);
-
-        pixmap = XCompositeNameWindowPixmap(display, window_id);
-
-        // xsync
-        XSync(display, 0);
-
-
-        let glx_pixmap = glXCreatePixmap(display, window.fbconfig,
-                                         pixmap, null());
-        XSync(display, 0);
         let mut texture: GLuint = 0;
+        glEnable(GL_TEXTURE_2D);
         glGenTextures(1, &mut texture);
         glBindTexture(GL_TEXTURE_2D, texture);
 
-        glXBindTexImageEXT(display, glx_pixmap, GLX_FRONT_LEFT_EXT as c_int, ptr::null_mut());
+        glXBindTexImageEXT(display, pixmap, GLX_FRONT_LEFT_EXT as c_int, null_mut());
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR as GLint);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR as GLint);
@@ -145,6 +136,9 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
             top = 1.0;
             bottom = 0.0;
         }
+        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE as GLfloat);
+
+
 
         glBegin(GL_QUADS);
 
@@ -162,8 +156,8 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
 
         glEnd();
 
-        glXReleaseTexImageEXT(display, glx_pixmap, GLX_FRONT_LEFT_EXT as c_int);
-        glXDestroyPixmap(display, glx_pixmap);
+        glXReleaseTexImageEXT(display, pixmap, GLX_FRONT_LEFT_EXT as c_int);
+        glDeleteTextures(1, &texture);
         XFreePixmap(display, pixmap);
     }
 }

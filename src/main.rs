@@ -40,20 +40,23 @@ fn main() {
         root = XRootWindowOfScreen(screen);
     }
     if display == null_mut() {
-        println!("Could not open display");
+        println!("could not open display");
         return;
     }
     if screen == null_mut() {
-        println!("Could not get screen");
+        println!("could not get screen");
         return;
     }
     if root == 0 {
-        println!("Could not get root window");
+        println!("could not get root window");
         return;
     }
     unsafe {
         XSync(display, 0);
     }
+    println!("display: {:?}", display);
+    println!("screen: {:?}", screen);
+    println!("root: {:?}", root);
 
     // get dimensions
     let mut src_width = 0;
@@ -92,6 +95,7 @@ fn main() {
     unsafe {
         XSync(display, 0);
     }
+    println!("source dimensions: {:?}x{:?}", src_width, src_height);
 
     let mut windows = LinkedList::new();
 
@@ -135,6 +139,7 @@ fn main() {
     let mut frame_windows: Vec<Window> = Vec::new();
     let mut windows_to_destroy: Vec<Window> = Vec::new();
     let mut windows_to_configure: Vec<CumWindow> = Vec::new();
+    let mut windows_to_open: Vec<Window> = Vec::new();
 
     let mut r= 0.0f64;
     let mut g= 0.0f64;
@@ -255,7 +260,7 @@ fn main() {
                             window_id: ev.window,
                             frame_id: 0,
                             fbconfig,
-                            is_opening: false,
+                            is_opening: true,
                             animation_time: 0,
                         });
                         need_redraw = true;
@@ -266,6 +271,9 @@ fn main() {
                             let ev = event.xexpose;
                             XMapWindow(display, ev.window);
                         }
+                        // add to windows to open
+                        windows_to_open.push(event.xexpose.window);
+
                         need_redraw = true;
                     }
                     ButtonPress => {
@@ -298,7 +306,7 @@ fn main() {
 
                 accent_color = ((((r as u32) << 16) | ((g as u32) << 8) | (b as u32)) | 0xFF000000) as u32;
                 t += 1;
-                need_redraw = true;
+                //need_redraw = true;
                 now = after;
             }
 
@@ -330,7 +338,7 @@ fn main() {
                             break;
                         }
                     }
-                    let w = unsafe { (*el.unwrap()).value };
+                    let mut w = unsafe { (*el.unwrap()).value };
                     // if we need to destroy this window, do so
                     if windows_to_destroy.contains(&w.window_id) {
                         unsafe {
@@ -354,6 +362,9 @@ fn main() {
                         windows_to_configure.retain(|x| x != &w);
                         el = windows.index(0);
                         i = 0;
+                    } else if windows_to_open.contains(&w.window_id) {
+                        w.is_opening = false;
+                        windows_to_open.retain(|x| x != &w.window_id);
                     } else {
                         // set the window's border color
                         unsafe {
@@ -377,7 +388,9 @@ fn main() {
                         }
 
                         // draw the window
-                        draw_x_window(w, display, visual, value);
+                        if !w.is_opening {
+                            draw_x_window(w, display, visual, value);
+                        }
 
                         el = windows.next_element(el.unwrap());
                         i += 1;
