@@ -111,6 +111,19 @@ pub unsafe fn get_window_fb_config(window: Window, display: *mut Display, screen
     *fbconfigs.offset(wanted_config as isize)
 }
 
+unsafe fn XDestroyImage(p0: *mut XImage) {
+    if p0.is_null() {
+        return;
+    }
+    if !(*p0).data.is_null() {
+        XFree((*p0).data as *mut c_void);
+    }
+    if !(*p0).obdata.is_null() {
+        XFree((*p0).obdata as *mut c_void);
+    }
+    XFree(p0 as *mut c_void);
+}
+
 pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint) {
     // now unsafe time!
     unsafe {

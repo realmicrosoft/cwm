@@ -248,19 +248,6 @@ pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_fo
     desktop
 }
 
-unsafe fn XDestroyImage(p0: *mut XImage) {
-    if p0.is_null() {
-        return;
-    }
-    if !(*p0).data.is_null() {
-        XFree((*p0).data as *mut c_void);
-    }
-    if !(*p0).obdata.is_null() {
-        XFree((*p0).obdata as *mut c_void);
-    }
-    XFree(p0 as *mut c_void);
-}
-
 
 pub unsafe fn setup_glx(display: *mut Display, overlay: Window, src_width: u32, src_height: u32, screen: *mut Screen)
     -> (GLXContext, *mut XVisualInfo, libsex::bindings::GLXFBConfig,
