@@ -197,7 +197,7 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
             top = 1.0;
             bottom = 0.0;
         }
-        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE as GLfloat);
+        glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE as GLfloat);
 
         glTexImage2D(GL_TEXTURE_2D, 0,
                      GL_RGBA8 as GLint, width, height,
@@ -212,17 +212,17 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
 
         glBegin(GL_QUADS);
 
-        glTexCoord2d(0.0, bottom);
-        glVertex2d(0.0, 0.0);
+        glTexCoord2d(1.0, 0.0);
+        glVertex2d(0.5, 0.5);
 
-        glTexCoord2d(1.0, top);
-        glVertex2d(0.0, 1.0);
+        glTexCoord2d(1.0, 1.0);
+        glVertex2d(0.5, -0.5);
 
-        glTexCoord2d(1.0, top);
-        glVertex2d(1.0, 1.0);
+        glTexCoord2d(0.0, 1.0);
+        glVertex2d(-0.5, -0.5);
 
-        glTexCoord2d(0.0, bottom);
-        glVertex2d(1.0, 0.0);
+        glTexCoord2d(0.0, 0.0);
+        glVertex2d(-0.5, 0.5);
 
         glEnd();
 

@@ -62,7 +62,7 @@ pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_fo
             backing_planes: 0,
             backing_pixel: 0,
             save_under: 0,
-            event_mask: ExposureMask as c_long,
+            event_mask: SubstructureNotifyMask as c_long,
             do_not_propagate_mask: 0,
             override_redirect: 0,
             colormap: 0,
