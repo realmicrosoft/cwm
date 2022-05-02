@@ -36,20 +36,20 @@ fn main() {
     // get stuffz
     unsafe {
         display = XOpenDisplay(null());
+        if display == null_mut() {
+            println!("could not open display");
+            return;
+        }
         screen = XDefaultScreenOfDisplay(display);
+        if screen == null_mut() {
+            println!("could not get screen");
+            return;
+        }
         root = XRootWindowOfScreen(screen);
-    }
-    if display == null_mut() {
-        println!("could not open display");
-        return;
-    }
-    if screen == null_mut() {
-        println!("could not get screen");
-        return;
-    }
-    if root == 0 {
-        println!("could not get root window");
-        return;
+        if root == 0 {
+            println!("could not get root window");
+            return;
+        }
     }
     unsafe {
         XSync(display, 0);
@@ -369,6 +369,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                         need_redraw = true;
                     },
                     12 => { // expose
+                        println!("expose");
                         // if window is desktop, redraw
                         if event.xexpose.window == desktop_id {
                             redraw_desktop(display, desktop_picture, desktop_id, pict_format, src_width as u32, src_height as u32);
@@ -437,26 +438,27 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
             let mut i = 0;
             while i < windows.len() {
                 if el.is_none(){
-                    // if index is 0, there aren't any windows
-                    if windows.len() > 0 {
-                        el = windows.index(0);
-                        i = 0;
-                    } else {
-                        break;
-                    }
+                    break;
                 }
                 let mut w = unsafe { (*el.unwrap()).value };
                 // if we need to destroy this window, do so
                 if windows_to_destroy.contains(&w.window_id) {
+                    println!("completely destroying window");
                     windows.remove_at_index(i).expect("Error removing window");
-                    el = windows.index(0);
                     windows_to_destroy.retain(|&x| x != w.window_id);
+                    el = windows.index(0);
                     i = 0;
                 } else if windows_to_open.contains(&w.window_id) {
-                    unsafe { (*el.unwrap()).value.is_opening = false; }
+                    println!("completely opening window");
+                    let mut window = unsafe { (*el.unwrap()).value };
+                    window.is_opening = false;
+                    windows.change_element_at_index(i, window).expect("Error changing window");
                     windows_to_open.retain(|x| x != &w.window_id);
                 } else if windows_to_hide.contains(&w.window_id) {
-                    unsafe { (*el.unwrap()).value.is_opening = true; }
+                    println!("completely hiding window");
+                    let mut window = unsafe { (*el.unwrap()).value };
+                    window.is_opening = true;
+                    windows.change_element_at_index(i, window).expect("Error changing window");
                     windows_to_hide.retain(|x| x != &w.window_id);
                 } else {
                     // for each window in windows to configure, check the window id
@@ -469,7 +471,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                             window.y = window_to_configure.unwrap().y;
                             window.width = window_to_configure.unwrap().width;
                             window.height = window_to_configure.unwrap().height;
-                            unsafe { (*el.unwrap()).value = window; }
+                            windows.change_element_at_index(i, window).expect("Error changing window");
                             windows_to_configure.retain(|x| x.window_id != w.window_id);
                         }
                     }
@@ -503,6 +505,11 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                     i += 1;
                 }
             }
+
+            // we don't want to accidentally destroy a window, so clear the windows to destroy list
+            windows_to_destroy.clear();
+            // likewise, clear the windows to hide list
+            windows_to_hide.clear();
 
 
             unsafe {

@@ -1,6 +1,7 @@
 // about to make a ton of rust programmers upset (:
 
 use std::fmt::format;
+use std::ops::DerefMut;
 use crate::types;
 
 pub struct Element {
@@ -119,8 +120,8 @@ impl LinkedList {
         // if before isn't found, we're at the bottom; thus, just deallocate the element and set the bottom to the next element
         if elements.1.is_none() && elements.0.is_some() {
             unsafe {
-                Box::from_raw(elements.0.unwrap());
                 self.bottom = (*elements.0.unwrap()).next;
+                Box::from_raw(elements.0.unwrap());
             }
             self.length -= 1;
             Ok(())
@@ -128,8 +129,17 @@ impl LinkedList {
             return Err(format!("index {} doesn't exist", index));
         } else {
             unsafe {
-                Box::from_raw(elements.0.unwrap());
                 (*elements.1.unwrap()).next = (*elements.0.unwrap()).next;
+                // check if the element we're removing is the top
+                if elements.0 == self.top {
+                    // is the next of the element we're removing a None?
+                    if (*elements.0.unwrap()).next.is_none() {
+                        self.top = elements.1;
+                    } else {
+                        self.top = (*elements.0.unwrap()).next;
+                    }
+                }
+                Box::from_raw(elements.0.unwrap());
             }
             self.length -= 1;
             Ok(())
@@ -139,6 +149,33 @@ impl LinkedList {
     pub fn next_element(&self, element: *mut Element) -> Option<*mut Element> {
         unsafe {
             (*element).next
+        }
+    }
+
+    pub fn change_element_at_index(&mut self, index: usize, value: types::CumWindow) -> Result<(), String> {
+        if index >= self.length {
+            return Err(format!("index out of bounds: {}", index));
+        }
+
+        let elements = self.index_and_before(index);
+        // if before isn't found, we're at the bottom; thus, just set the bottom to the value
+        if elements.1.is_none() && elements.0.is_some() {
+            unsafe {
+                let mut tmp = Box::from_raw(elements.0.unwrap());
+                tmp.value = value;
+                self.bottom = Some(Box::into_raw(tmp));
+            }
+            Ok(())
+        } else if elements.0.is_none() { // index doesn't exist, return error
+            return Err(format!("index {} doesn't exist", index));
+        } else {
+            unsafe {
+                let mut tmp = Box::from_raw(elements.0.unwrap());
+                tmp.value = value;
+                (*elements.1.unwrap()).next = Some(Box::into_raw(tmp));
+
+            }
+            Ok(())
         }
     }
 

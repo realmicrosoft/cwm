@@ -236,22 +236,19 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
             err = glGetError();
         }
 
-        // bottom left is the origin, however, we want to draw from the top left
-        // convert to opengl coordinates
-
         glBegin(GL_QUADS);
 
-        glTexCoord2d(1.0, 1.0); // top right
-        glVertex2d(0.0, 0.0);
+        glTexCoord2d(1.0, 0.0); // top right of the drawing area
+        glVertex2d(width as GLdouble, 0.0);
 
-        glTexCoord2d(1.0, 0.0); // bottom right
-        glVertex2d(0.0, height as GLdouble);
-
-        glTexCoord2d(0.0, 0.0); // bottom left
+        glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
         glVertex2d(width as GLdouble, height as GLdouble);
 
-        glTexCoord2d(0.0, 1.0); // top left
-        glVertex2d(width as GLdouble, 0.0);
+        glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
+        glVertex2d(0.0, height as GLdouble);
+
+        glTexCoord2d(0.0, 0.0); // top left of the drawing area
+        glVertex2d(100.0 + 0.0, 0.0);
 
         glEnd();
 
