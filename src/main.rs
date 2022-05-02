@@ -492,7 +492,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                         }
                     },
                     5 => { // button release
-let ev = event.xbutton;
+                        let ev = event.xbutton;
                         if ev.button == 1 {
                             // left click
                             println!("left click");
@@ -601,9 +601,12 @@ let ev = event.xbutton;
                     println!("finally moving window");
                     let mut window = unsafe { (*el.unwrap()).value };
                     unsafe {
-                        XMoveWindow(display, window.window_id, window.x as c_int, window.y as c_int);
+                        XMoveWindow(display, window.window_id, holding_window_x as c_int, holding_window_y as c_int);
+                        XSync(display, 0);
                     }
                     window.use_actual_position = true;
+                    window.x = holding_window_x;
+                    window.y = holding_window_y;
                     windows.change_element_at_index(i, window).expect("Error changing window");
                     windows_to_finally_move.retain(|x| x != &w.window_id);
                     holding_window = 0;
@@ -616,26 +619,27 @@ let ev = event.xbutton;
                             if let Some(..) = window_to_configure {
                                 let mut window = unsafe { (*el.unwrap()).value };
                                 if window.use_actual_position {
+                                    window.x = window_to_configure.unwrap().x;
+                                    window.y = window_to_configure.unwrap().y;
                                     window.width = window_to_configure.unwrap().width;
                                     window.height = window_to_configure.unwrap().height;
+                                    // move the frame window to the correct position
+                                    unsafe {
+                                        XMoveWindow(display, window.frame_id, window.x - 10, window.y - 20);
+                                        XResizeWindow(display, window.frame_id, (window.width + 20) as c_uint, (window.height + 25) as c_uint);
+                                    }
+
+                                    // send the configure event to the window
+                                    if let Some(..) = window.event {
+                                        let mut event = window.event.unwrap();
+                                        unsafe {
+                                            XSendEvent(display, window.window_id, 0, 0, &mut event);
+                                            XFlush(display);
+                                        }
+                                    }
                                 }
                                 window.has_alpha = window_to_configure.unwrap().has_alpha;
                                 windows.change_element_at_index(i, window).expect("Error changing window");
-
-                                // move the frame window to the correct position
-                                unsafe {
-                                    XMoveWindow(display, window.frame_id, window.x - 10, window.y - 20);
-                                    XResizeWindow(display, window.frame_id, (window.width + 20) as c_uint, (window.height + 25) as c_uint);
-                                }
-
-                                // send the configure event to the window
-                                if let Some(..) = window.event {
-                                    let mut event = window.event.unwrap();
-                                    unsafe {
-                                        XSendEvent(display, window.window_id, 0, 0, &mut event);
-                                        XFlush(display);
-                                    }
-                                }
 
                                 windows_to_configure.retain(|x| x.window_id != w.window_id);
                             }
@@ -695,8 +699,8 @@ let ev = event.xbutton;
                             XSync(display, 0);
                         }
                         // move the window to the cursor position (minus the offset)
-                        window.x = mouse_x - holding_window_x_offset;
-                        window.y = mouse_y - holding_window_y_offset;
+                        window.x = win_x_return - holding_window_x_offset;
+                        window.y = win_y_return - holding_window_y_offset;
                         holding_window_x = window.x;
                         holding_window_y = window.y;
                         draw_x_window(window, true, display, shader_program,
