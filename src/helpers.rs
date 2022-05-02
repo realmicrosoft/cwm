@@ -150,49 +150,32 @@ pub fn redraw_desktop(display: *mut Display, picture: Picture, desktop: Picture,
     }
 }
 
-pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint, force_fullscreen: bool, src_width: u32, src_height: u32, border_r: u32, border_g: u32, border_b: u32) {
+pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint, force_fullscreen: bool, src_width: u32, src_height: u32, border_r: u32, border_g: u32, border_b: u32) {
     // now unsafe time!
     unsafe {
 
 
         let window_id = window.window_id;
+        let frame_id = window.frame_id;
 
-        // get window attribs
-        let mut attribs: XWindowAttributes = XWindowAttributes{
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-            border_width: 0,
-            depth: 0,
-            visual: null_mut(),
-            root: 0,
-            class: 0,
-            bit_gravity: 0,
-            win_gravity: 0,
-            backing_store: 0,
-            backing_planes: 0,
-            backing_pixel: 0,
-            save_under: 0,
-            colormap: 0,
-            map_installed: 0,
-            map_state: 0,
-            all_event_masks: 0,
-            your_event_mask: 0,
-            do_not_propagate_mask: 0,
-            override_redirect: 0,
-            screen: null_mut()
-        };
-        XGetWindowAttributes(display, window_id, &mut attribs);
-
-        let width = attribs.width;
-        let height = attribs.height;
+        let frame_x = (window.x - 10) as f32;
+        let frame_y = (window.y - 20) as f32;
+        let frame_width = (window.width + 20) as f32;
+        let frame_height = (window.height + 25) as f32;
 
         //println!("{} {}", width, height);
 
+        let frame_xim;
         let xim = XGetImage(display, window_id,
                             0, 0,
                             window.width as c_uint, window.height as c_uint, XAllPlanes(), ZPixmap as c_int);
+        if draw_frame {
+            frame_xim = XGetImage(display, frame_id,
+                                  0, 0,
+                                  window.width as c_uint + 20, window.height as c_uint + 25, XAllPlanes(), ZPixmap as c_int);
+        } else {
+            frame_xim = xim;
+        }
         XSync(display, 0);
 
         if xim.is_null() {
@@ -201,25 +184,95 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
             return;
         }
 
-        let border_width = attribs.border_width as f64;
+        let border_width = 1 as GLfloat;
+        //glPushAttrib(GL_CURRENT_BIT);
 
-        glDisable(GL_TEXTURE_2D);
-        glBegin(GL_QUADS);
-        glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
-        glVertex2d((window.x as i32 + width) as GLdouble + border_width, window.y as GLdouble - border_width);
+        if draw_frame && !force_fullscreen {
+            glLineWidth(border_width);
 
-        //glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
-        glVertex2d((window.x as i32 + width) as GLdouble + border_width, (window.y as i32 + height) as GLdouble + border_width);
+            glDisable(GL_TEXTURE_2D);
+            glBegin(GL_LINES);
+            glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
 
-        //glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
-        glVertex2d(window.x as GLdouble - border_width, (window.y as i32 + height) as GLdouble + border_width);
+            // top left to bottom left
+            glVertex2f(frame_x, frame_y);
+            glVertex2f(frame_x, frame_y + frame_height);
 
-        //glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
-        glVertex2d(window.x as GLdouble - border_width, window.y as GLdouble - border_width);
-        glEnd();
+            // top left to top right
+            glVertex2f(frame_x - (border_width / 2.0), frame_y);
+            glVertex2f(frame_x + frame_width + (border_width / 2.0), frame_y);
+
+            // top right to bottom right
+            glVertex2f(frame_x + frame_width, frame_y);
+            glVertex2f(frame_x + frame_width, frame_y + frame_height);
+
+            // bottom right to bottom left
+            glVertex2f(frame_x + frame_width + (border_width / 2.0), frame_y + frame_height);
+            glVertex2f(frame_x - (border_width / 2.0), frame_y + frame_height);
+
+            glEnd();
+        }
 
         let mut texture: GLuint = 0;
         glEnable(GL_TEXTURE_2D);
+        let mut frame_texture: GLuint = 0;
+        if draw_frame {
+            // create another texture for the frame
+            glGenTextures(1, &mut frame_texture);
+            glBindTexture(GL_TEXTURE_2D, frame_texture);
+            let loc = glGetUniformLocation(shader_program, "tex".as_ptr() as *const i8);
+            glUniform1i(loc, 0);
+
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR as GLint);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR as GLint);
+            glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE as GLfloat);
+
+            glTexImage2D(GL_TEXTURE_2D, 0,
+                         GL_RGBA8 as GLint, window.width as i32 + 20, window.height as i32 + 25,
+                         0, GL_BGRA,
+                         GL_UNSIGNED_BYTE, (*frame_xim).data as *mut c_void);
+
+            glBegin(GL_QUADS);
+            glTexCoord2d(1.0, 0.0); // top right of the drawing area
+            glVertex2d((frame_x as i32 + frame_width as i32) as GLdouble, frame_y as GLdouble);
+
+            glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
+            glVertex2d((frame_x as i32 + frame_width as i32) as GLdouble, (frame_y as i32 + frame_height as i32) as GLdouble);
+
+            glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
+            glVertex2d(frame_x as GLdouble, (frame_y as i32 + frame_height as i32) as GLdouble);
+
+            glTexCoord2d(0.0, 0.0); // top left of the drawing area
+            glVertex2d(frame_x as GLdouble, frame_y as GLdouble);
+
+            glEnd();
+        }
+        if !force_fullscreen {
+            glLineWidth(border_width);
+
+            glDisable(GL_TEXTURE_2D);
+            glBegin(GL_LINES);
+            glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
+
+            // top left to bottom left
+            glVertex2f(window.x as GLfloat, window.y as GLfloat);
+            glVertex2f(window.x as GLfloat, (window.y + window.height as i32) as GLfloat);
+
+            // top left to top right
+            glVertex2f(window.x as GLfloat, window.y as GLfloat);
+            glVertex2f((window.x + window.width as i32) as GLfloat, window.y as GLfloat);
+
+            // top right to bottom right
+            glVertex2f((window.x + window.width as i32) as GLfloat, window.y as GLfloat);
+            glVertex2f((window.x + window.width as i32) as GLfloat, (window.y + window.height as i32) as GLfloat);
+
+            // bottom right to bottom left
+            glVertex2f((window.x + window.width as i32) as GLfloat, (window.y + window.height as i32) as GLfloat);
+            glVertex2f(window.x as GLfloat, (window.y + window.height as i32) as GLfloat);
+
+            glEnd();
+            glEnable(GL_TEXTURE_2D);
+        }
         glGenTextures(1, &mut texture);
         glBindTexture(GL_TEXTURE_2D, texture);
         let loc = glGetUniformLocation(shader_program, "tex".as_ptr() as *const i8);
@@ -227,48 +280,44 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR as GLint);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR as GLint);
-
-        let top: GLdouble;
-        let bottom: GLdouble;
-
-
-        if value == 1
-        {
-            top = 0.0;
-            bottom = 1.0;
-        }
-        else
-        {
-            top = 1.0;
-            bottom = 0.0;
-        }
         glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE as GLfloat);
 
         glTexImage2D(GL_TEXTURE_2D, 0,
-                     GL_RGBA8 as GLint, width, height,
+                     GL_RGBA8 as GLint, window.width as i32, window.height as i32,
                      0, GL_BGRA,
                      GL_UNSIGNED_BYTE, (*xim).data as *mut c_void);
 
+
         let mut err = glGetError();
-        while err != GL_NO_ERROR {
-            if err != 1282 { // don't print this error because it shows up too much and i don't like it
-                println!("{}", err);
+        let care_about_errors = false; // printing the errors takes a lot of cpu time, disable unless debugging
+        if care_about_errors {
+            while err != GL_NO_ERROR {
+                if err != 1282 { // don't print this error because it shows up too much and i don't like it
+                    println!("{}", err);
+                }
+                err = glGetError();
             }
-            err = glGetError();
+        }
+
+        if window.has_alpha {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        } else {
+            glDisable(GL_BLEND);
         }
 
         glBegin(GL_QUADS);
 
         if !force_fullscreen {
             glTexCoord2d(1.0, 0.0); // top right of the drawing area
-            glVertex2d((window.x as i32 + width) as GLdouble, window.y as GLdouble);
+            glVertex2d((window.x as i32 + window.width as i32) as GLdouble, window.y as GLdouble);
 
             glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
-            glVertex2d((window.x as i32 + width) as GLdouble, (window.y as i32 + height) as GLdouble);
+            glVertex2d((window.x as i32 + window.width as i32) as GLdouble, (window.y as i32 + window.height as i32) as GLdouble);
 
             glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
 
-            glVertex2d(window.x as GLdouble, (window.y as i32 + height) as GLdouble);
+            glVertex2d(window.x as GLdouble, (window.y as i32 + window.height as i32) as GLdouble);
 
             glTexCoord2d(0.0, 0.0); // top left of the drawing area
             glVertex2d(window.x as GLdouble, window.y as GLdouble);
@@ -289,6 +338,12 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
         glEnd();
 
         glDeleteTextures(1, &texture);
+        if draw_frame {
+            glDeleteTextures(1, &frame_texture);
+        }
         XDestroyImage(xim);
+        if draw_frame {
+            XDestroyImage(frame_xim);
+        }
     }
 }

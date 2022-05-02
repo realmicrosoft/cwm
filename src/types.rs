@@ -10,5 +10,5 @@ pub struct CumWindow {
     pub frame_id: Window,
     pub fbconfig: GLXFBConfig,
     pub is_opening: bool,
-    pub animation_time: i32,
+    pub has_alpha: bool,
 }
