@@ -420,39 +420,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                     }
                     23 => { // configure request
                         let ev = event.xconfigure;
-                        println!("configure request!");
-                        // check if this is a frame window
-                        if !frame_windows.contains(ev.window.borrow()) {
-                            // check if the window is the root window
-                            if ev.window == root {
-                                src_height = ev.height;
-                                src_width = ev.width;
-                                // todo: resize the sdl window (do we still need to do this?)
-                            }
-                            let fbconfig = get_window_fb_config(ev.window, display, screen);
-                            let mut attribs : mem::MaybeUninit<XWindowAttributes> = mem::MaybeUninit::uninit();
-                            XGetWindowAttributes(display, ev.window, attribs.as_mut_ptr());
-                            let format = XRenderFindVisualFormat(display, attribs.assume_init().visual);
-                            // add to windows to configure
-                            windows_to_configure.push(CumWindow {
-                                x: ev.x as i32,
-                                y: ev.y as i32,
-                                width: ev.width as u16,
-                                height: ev.height as u16,
-                                window_id: ev.window,
-                                frame_id: 0,
-                                fbconfig,
-                                hide: false,
-                                has_alpha: ( (*format).type_ == PictTypeDirect as c_int && (*format).direct.alphaMask != 0 ),
-                                use_actual_position: true,
-                                event: Some(event),
-                                velocity: XVelocity {
-                                    x_speed: 0.0,
-                                    last_x_location: 0,
-                                }
-                            });
-                            need_redraw = true;
-                        }
+                        println!("configure request! (don't care)");
                         XFlush(display);
                     },
                     19 => { // map notify
@@ -628,7 +596,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                     holding_window = 0;
                 } else {
                     // for each window in windows to configure, check the window id
-                    if holding_window == 0 {
+                    if holding_window != w.window_id {
                         if windows_to_configure.iter().any(|x| x.window_id == w.window_id) {
                             // if the window is in the list, update the window
                             let mut window_to_configure = windows_to_configure.iter().find(|x| x.window_id == w.window_id);
@@ -637,23 +605,27 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 if window.use_actual_position {
                                     window.x = window_to_configure.unwrap().x;
                                     window.y = window_to_configure.unwrap().y;
-                                    window.width = window_to_configure.unwrap().width;
-                                    window.height = window_to_configure.unwrap().height;
                                     // move the frame window to the correct position
                                     unsafe {
                                         XMoveWindow(display, window.frame_id, window.x - 10, window.y - 20);
-                                        XResizeWindow(display, window.frame_id, (window.width + 20) as c_uint, (window.height + 25) as c_uint);
                                     }
 
                                     // send the configure event to the window
                                     if let Some(..) = window.event {
                                         let mut event = window.event.unwrap();
                                         unsafe {
-                                            XSendEvent(display, window.window_id, 0, 0, &mut event);
+                                            //XSendEvent(display, window.window_id, 0, 0, &mut event);
                                             XFlush(display);
                                         }
                                     }
                                 }
+                                window.width = window_to_configure.unwrap().width;
+                                window.height = window_to_configure.unwrap().height;
+
+                                unsafe {
+                                    XResizeWindow(display, window.frame_id, (window.width + 20) as c_uint, (window.height + 25) as c_uint);
+                                }
+
                                 window.has_alpha = window_to_configure.unwrap().has_alpha;
                                 windows.change_element_at_index(i, window).expect("Error changing window");
 
@@ -738,7 +710,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                         w.velocity.last_x_location = w.x;
                         windows.change_element_at_index(i, w);
                     } else if w.velocity.x_speed != 0.0 {
-                        w.velocity.x_speed = w.velocity.x_speed * 0.7;
+                        w.velocity.x_speed = w.velocity.x_speed * 0.89;
                         windows.change_element_at_index(i, w);
                     }
 
