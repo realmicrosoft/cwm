@@ -210,8 +210,8 @@ pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display,
             glVertex2f(frame_x + frame_width, frame_y + frame_height);
 
             // bottom right to bottom left
-            glVertex2f(frame_x + frame_width + (border_width / 2.0), frame_y + frame_height);
-            glVertex2f(frame_x - (border_width / 2.0), frame_y + frame_height);
+            glVertex2f(frame_x + frame_width + (border_width / 2.0) + window.velocity.x_speed as f32, frame_y + frame_height);
+            glVertex2f(frame_x - (border_width / 2.0) - window.velocity.x_speed as f32, frame_y + frame_height);
 
             glEnd();
         }
@@ -240,10 +240,10 @@ pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display,
             glVertex2d((frame_x as i32 + frame_width as i32) as GLdouble, frame_y as GLdouble);
 
             glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
-            glVertex2d((frame_x as i32 + frame_width as i32) as GLdouble, (frame_y as i32 + frame_height as i32) as GLdouble);
+            glVertex2d((frame_x as i32 + frame_width as i32) as GLdouble + window.velocity.x_speed, (frame_y as i32 + frame_height as i32) as GLdouble);
 
             glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
-            glVertex2d(frame_x as GLdouble, (frame_y as i32 + frame_height as i32) as GLdouble);
+            glVertex2d(frame_x as GLdouble - window.velocity.x_speed, (frame_y as i32 + frame_height as i32) as GLdouble);
 
             glTexCoord2d(0.0, 0.0); // top left of the drawing area
             glVertex2d(frame_x as GLdouble, frame_y as GLdouble);
@@ -270,8 +270,8 @@ pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display,
             glVertex2f((window_x + window.width as i32) as GLfloat, (window_y + window.height as i32) as GLfloat);
 
             // bottom right to bottom left
-            glVertex2f((window_x + window.width as i32) as GLfloat, (window_y + window.height as i32) as GLfloat);
-            glVertex2f(window_x as GLfloat, (window_y + window.height as i32) as GLfloat);
+            glVertex2f((window_x + window.width as i32) as GLfloat + window.velocity.x_speed as f32, (window_y + window.height as i32) as GLfloat);
+            glVertex2f(window_x as GLfloat - window.velocity.x_speed as f32, (window_y + window.height as i32) as GLfloat);
 
             glEnd();
             glEnable(GL_TEXTURE_2D);
@@ -316,11 +316,11 @@ pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display,
             glVertex2d((window_x as i32 + window.width as i32) as GLdouble, window_y as GLdouble);
 
             glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
-            glVertex2d((window_x as i32 + window.width as i32) as GLdouble, (window_y as i32 + window.height as i32) as GLdouble);
+            glVertex2d((window_x as i32 + window.width as i32) as GLdouble + window.velocity.x_speed, (window_y as i32 + window.height as i32) as GLdouble);
 
             glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
 
-            glVertex2d(window_x as GLdouble, (window_y as i32 + window.height as i32) as GLdouble);
+            glVertex2d(window_x as GLdouble - window.velocity.x_speed, (window_y as i32 + window.height as i32) as GLdouble);
 
             glTexCoord2d(0.0, 0.0); // top left of the drawing area
             glVertex2d(window_x as GLdouble, window_y as GLdouble);

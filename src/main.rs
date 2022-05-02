@@ -13,7 +13,7 @@ use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
 use libsex::bindings::{AnyModifier, ButtonPressMask, ButtonReleaseMask, ClientMessage, CopyFromParent, CWBackPixel, CWBackPixmap, CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_BLEND, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_ONE_MINUS_SRC_ALPHA, GL_PROJECTION, GL_SRC_ALPHA, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, glBlendFunc, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnable, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, gluOrtho2D, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, GrabModeAsync, InputOutput, PictTypeDirect, PlaceOnTop, PointerMotionMask, QueuedAfterFlush, QueuedAlready, Screen, Visual, Window, XChangeWindowAttributes, XCirculateSubwindows, XClientMessageEvent, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XGrabButton, XLowerWindow, XMapWindow, XMoveWindow, XNextEvent, XOpenDisplay, XQueryPointer, XRaiseWindow, XRenderFindVisualFormat, XResizeWindow, XRootWindowOfScreen, XSendEvent, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
-use crate::types::{CumWindow};
+use crate::types::{CumWindow, XVelocity};
 use crate::helpers::{allow_input_passthrough, draw_x_window, get_window_fb_config, redraw_desktop, rgba_to_bgra};
 use crate::linkedlist::LinkedList;
 use crate::setup::{setup_compositing, setup_desktop, setup_glx};
@@ -137,6 +137,10 @@ fn main() {
         has_alpha: true,
         use_actual_position: false,
         event: None,
+        velocity: XVelocity{
+            x_speed: 0.0,
+            last_x_location: 0.0,
+        }
     };
 
     // rather use more memory than lose performance
@@ -354,6 +358,10 @@ gl_FragColor = texture2D(tex, Texcoord);
                                     fbconfig,
                                     use_actual_position: true,
                                     event: None,
+                                    velocity: XVelocity{
+                                        x_speed: 0.0,
+                                        last_x_location: ev.x as f64,
+                                    }
                                 }).expect("failed to add window");
                                 need_redraw = true;
                             }
@@ -402,6 +410,10 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 has_alpha: ( (*format).type_ == PictTypeDirect as c_int && (*format).direct.alphaMask != 0 ),
                                 use_actual_position: true,
                                 event: Some(event),
+                                velocity: XVelocity {
+                                    x_speed: 0.0,
+                                    last_x_location: 0.0,
+                                }
                             });
                             need_redraw = true;
                         }
@@ -434,6 +446,10 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 has_alpha: ( (*format).type_ == PictTypeDirect as c_int && (*format).direct.alphaMask != 0 ),
                                 use_actual_position: true,
                                 event: Some(event),
+                                velocity: XVelocity {
+                                    x_speed: 0.0,
+                                    last_x_location: 0.0,
+                                }
                             });
                             need_redraw = true;
                         }

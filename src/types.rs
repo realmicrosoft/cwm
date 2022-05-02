@@ -13,4 +13,11 @@ pub struct CumWindow {
     pub has_alpha: bool, // whether the window has an alpha channel
     pub use_actual_position: bool, // should we render at the window's actual position, or the position we want it to be at?
     pub event: Option<XEvent>, // an associated event
+    pub velocity: XVelocity, // the velocity of the window
+}
+
+#[derive(Clone, Copy)]
+pub struct XVelocity {
+    pub x_speed: f64, // the x speed of the window
+    pub last_x_location: f64, // the last x location of the window (for calculating the speed)
 }
