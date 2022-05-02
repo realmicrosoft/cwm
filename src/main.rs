@@ -11,7 +11,7 @@ use std::ptr::{null, null_mut};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_COLOR_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_PROJECTION, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, gluOrtho2D, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, QueuedAfterFlush, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
+use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_PROJECTION, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, gluOrtho2D, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, QueuedAfterFlush, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
 use crate::types::CumWindow;
 use crate::helpers::{allow_input_passthrough, draw_x_window, get_window_fb_config, redraw_desktop, rgba_to_bgra};
 use crate::linkedlist::LinkedList;
@@ -315,8 +315,8 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                                 windows.push(CumWindow {
                                     window_id: ev.window,
                                     frame_id: 0,
-                                    x: ev.x as i16,
-                                    y: ev.y as i16 - 10,
+                                    x: ev.x as i32,
+                                    y: ev.y as i32,// - 10,
                                     width: ev.width as u16,
                                     height: ev.height as u16,
                                     is_opening: true,
@@ -345,8 +345,8 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                         let fbconfig = get_window_fb_config(ev.window, display, screen);
                         // add to windows to configure
                         windows_to_configure.push(CumWindow{
-                            x: ev.x as i16,
-                            y: ev.y as i16,
+                            x: ev.x as i32,
+                            y: ev.y as i32,
                             width: ev.width as u16,
                             height: ev.height as u16,
                             window_id: ev.window,
@@ -408,7 +408,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
         }
 
         let after = SystemTime::now();
-        if after.duration_since(now).unwrap().as_millis() > 10 {
+        if after.duration_since(now).unwrap().as_millis() > (1/60) as u128 {
             // generate the rainbow using a sine wave
             let frequency = 0.05;
             r = ((frequency * (t as f64) + 0.0).sin() * 127.0f64 + 128.0f64);
@@ -425,7 +425,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
             //println!("redrawing");
             unsafe {
                 glClearColor((r/255.0f64) as GLclampf, (g/255.0f64) as GLclampf, (b/255.0f64) as GLclampf, 1.0);
-                glClear(GL_COLOR_BUFFER_BIT);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
                 /*
                 glMatrixMode(GL_PROJECTION);
@@ -478,27 +478,30 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                             windows_to_configure.retain(|x| x.window_id != w.window_id);
                         }
                     }
-                    // set the window's border color
-                    /*unsafe {
-                        XChangeWindowAttributes(display, w.window_id, CWBorderPixel as c_ulong, &mut XSetWindowAttributes {
-                            background_pixmap: 0,
-                            background_pixel: 0,
-                            border_pixmap: 0,
-                            border_pixel: accent_color as c_ulong,
-                            bit_gravity: 0,
-                            win_gravity: 0,
-                            backing_store: 0,
-                            backing_planes: 0,
-                            backing_pixel: 0,
-                            save_under: 0,
-                            event_mask: 0,
-                            do_not_propagate_mask: 0,
-                            override_redirect: 0,
-                            colormap: 0,
-                            cursor: 0,
-                        });
+                    // move the window x and y by +1
+                    let future_x = w.x + 1;
+                    let future_y = w.y + 1;
+
+                    // if the future_x or future_y is greater than the screen width or height,
+                    // move the window back to the start
+                    w.x = future_x;
+                    w.y = future_y;
+                    if future_x > src_width as i32 {
+                        w.x = (0 - w.width as i32);
                     }
-                     */
+                    if future_y > src_height as i32 {
+                        w.y = (0 - w.height as i32);
+                    }
+
+                    unsafe { XConfigureWindow(display, w.window_id, (CWX | CWY), &mut XWindowChanges{
+                        x: w.x as c_int,
+                        y: w.y as c_int,
+                        width: 0,
+                        height: 0,
+                        border_width: 0,
+                        sibling: 0,
+                        stack_mode: 0,
+                    }) };
 
                     // draw the window
                     if !w.is_opening {

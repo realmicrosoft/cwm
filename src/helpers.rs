@@ -153,6 +153,8 @@ pub fn redraw_desktop(display: *mut Display, picture: Picture, desktop: Picture,
 pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint, force_fullscreen: bool, src_width: u32, src_height: u32, border_r: u32, border_g: u32, border_b: u32) {
     // now unsafe time!
     unsafe {
+
+
         let window_id = window.window_id;
 
         // get window attribs
@@ -198,6 +200,23 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
             XFree(xim as *mut c_void);
             return;
         }
+
+        let border_width = attribs.border_width as f64;
+
+        glDisable(GL_TEXTURE_2D);
+        glBegin(GL_QUADS);
+        glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
+        glVertex2d((window.x as i32 + width) as GLdouble + border_width, window.y as GLdouble - border_width);
+
+        //glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
+        glVertex2d((window.x as i32 + width) as GLdouble + border_width, (window.y as i32 + height) as GLdouble + border_width);
+
+        //glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
+        glVertex2d(window.x as GLdouble - border_width, (window.y as i32 + height) as GLdouble + border_width);
+
+        //glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
+        glVertex2d(window.x as GLdouble - border_width, window.y as GLdouble - border_width);
+        glEnd();
 
         let mut texture: GLuint = 0;
         glEnable(GL_TEXTURE_2D);
@@ -248,18 +267,12 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
             glVertex2d((window.x as i32 + width) as GLdouble, (window.y as i32 + height) as GLdouble);
 
             glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
+
             glVertex2d(window.x as GLdouble, (window.y as i32 + height) as GLdouble);
 
             glTexCoord2d(0.0, 0.0); // top left of the drawing area
             glVertex2d(window.x as GLdouble, window.y as GLdouble);
         } else { // use src_width and src_height to get the size of the fullscreen window
-
-            // draw a slightly larger quad behind the window for the border
-            glColor3ub(border_r as GLubyte, border_g as GLubyte, border_b as GLubyte);
-            glRecti(window.x as i32, window.y as i32, (window.x as i32 + src_width as i32) as GLint, (window.y as i32 + src_height as i32) as GLint);
-
-            glColor3ub(255 as GLubyte, 255 as GLubyte, 255 as GLubyte);
-
             glTexCoord2d(1.0, 0.0); // top right of the drawing area
             glVertex2d(src_width as GLdouble, 0.0);
 

@@ -2,8 +2,8 @@ use libsex::bindings::{GLXFBConfig, Window};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CumWindow {
-    pub x: i16,
-    pub y: i16,
+    pub x: i32,
+    pub y: i32,
     pub width: u16,
     pub height: u16,
     pub window_id: Window,
