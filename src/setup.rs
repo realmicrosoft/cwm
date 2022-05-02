@@ -119,7 +119,7 @@ pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_fo
     let mut src = fr::Image::from_vec_u8(
         bg_image_width,
         bg_image_height,
-        bg_image.data.clone(),
+        bg_image.data,
         fr::PixelType::U8x4,
     ).unwrap();
     // Create MulDiv instance

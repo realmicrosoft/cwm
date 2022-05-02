@@ -67,7 +67,7 @@ pub unsafe fn get_window_fb_config(window: Window, display: *mut Display, screen
     let mut nfbconfigs: *mut c_int = Box::into_raw(Box::new(0)) as *mut c_int;
     let fbconfigs = glXGetFBConfigs(display, 0, nfbconfigs);
     XSync(display, 0);
-    println!("{}", *nfbconfigs);
+    //println!("{}", *nfbconfigs);
     if fbconfigs.is_null() {
         panic!("could not get fbconfigs");
     }
@@ -106,7 +106,7 @@ pub unsafe fn get_window_fb_config(window: Window, display: *mut Display, screen
     // consume
     Box::from_raw(nfbconfigs);
 
-    println!("{}", wanted_config);
+    //println!("{}", wanted_config);
 
     *fbconfigs.offset(wanted_config as isize)
 }
@@ -150,7 +150,7 @@ pub fn redraw_desktop(display: *mut Display, picture: Picture, desktop: Picture,
     }
 }
 
-pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint, src_width: i32, src_height: i32) {
+pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint, force_fullscreen: bool, src_width: u32, src_height: u32, border_r: u32, border_g: u32, border_b: u32) {
     // now unsafe time!
     unsafe {
         let window_id = window.window_id;
@@ -232,23 +232,46 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
 
         let mut err = glGetError();
         while err != GL_NO_ERROR {
-            println!("{}", err);
+            if err != 1282 { // don't print this error because it shows up too much and i don't like it
+                println!("{}", err);
+            }
             err = glGetError();
         }
 
         glBegin(GL_QUADS);
 
-        glTexCoord2d(1.0, 0.0); // top right of the drawing area
-        glVertex2d(width as GLdouble, 0.0);
+        if !force_fullscreen {
+            glTexCoord2d(1.0, 0.0); // top right of the drawing area
+            glVertex2d((window.x as i32 + width) as GLdouble, window.y as GLdouble);
 
-        glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
-        glVertex2d(width as GLdouble, height as GLdouble);
+            glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
+            glVertex2d((window.x as i32 + width) as GLdouble, (window.y as i32 + height) as GLdouble);
 
-        glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
-        glVertex2d(0.0, height as GLdouble);
+            glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
+            glVertex2d(window.x as GLdouble, (window.y as i32 + height) as GLdouble);
 
-        glTexCoord2d(0.0, 0.0); // top left of the drawing area
-        glVertex2d(100.0 + 0.0, 0.0);
+            glTexCoord2d(0.0, 0.0); // top left of the drawing area
+            glVertex2d(window.x as GLdouble, window.y as GLdouble);
+        } else { // use src_width and src_height to get the size of the fullscreen window
+
+            // draw a slightly larger quad behind the window for the border
+            glColor3ub(border_r as GLubyte, border_g as GLubyte, border_b as GLubyte);
+            glRecti(window.x as i32, window.y as i32, (window.x as i32 + src_width as i32) as GLint, (window.y as i32 + src_height as i32) as GLint);
+
+            glColor3ub(255 as GLubyte, 255 as GLubyte, 255 as GLubyte);
+
+            glTexCoord2d(1.0, 0.0); // top right of the drawing area
+            glVertex2d(src_width as GLdouble, 0.0);
+
+            glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
+            glVertex2d(src_width as GLdouble, src_height as GLdouble);
+
+            glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
+            glVertex2d(0.0, src_height as GLdouble);
+
+            glTexCoord2d(0.0, 0.0); // top left of the drawing area
+            glVertex2d(0.0, 0.0);
+        }
 
         glEnd();
 

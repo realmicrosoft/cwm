@@ -11,7 +11,7 @@ use std::ptr::{null, null_mut};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_COLOR_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_PROJECTION, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, QueuedAfterFlush, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
+use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_COLOR_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_PROJECTION, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, gluOrtho2D, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, QueuedAfterFlush, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
 use crate::types::CumWindow;
 use crate::helpers::{allow_input_passthrough, draw_x_window, get_window_fb_config, redraw_desktop, rgba_to_bgra};
 use crate::linkedlist::LinkedList;
@@ -167,11 +167,12 @@ attribute vec2 texcoord;
 varying vec3 Color;
 varying vec2 Texcoord;
 
+uniform mat4 projection;
 
 void main()
 {
 
-gl_Position = vec4(position, 0.0, 1.0);
+gl_Position = projection * vec4(position, 0.0, 1.0);
 Color = color;
 Texcoord = texcoord;
 }
@@ -235,10 +236,12 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
 
         glBufferData(GL_ARRAY_BUFFER, (mem::size_of::<f32>() * texture_coords.len() as usize) as GLsizeiptr, texture_coords.as_ptr() as *const c_void, GL_STATIC_DRAW);
 
+        glViewport(0, 0, src_width as i32, src_height as i32);
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         // make top left corner as origin
-        glOrtho(0.0, src_width as f64, src_height as f64, 0.0, -1.0, 1.0);
+        //glOrtho(0.0, src_width as f64, src_height as f64, 0.0, -1.0, 1.0);
+        gluOrtho2D(0.0, src_width as f64, src_height as f64, 0.0);
     }
 
     loop {
@@ -465,7 +468,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                     if windows_to_configure.iter().any(|x| x.window_id == w.window_id) {
                         // if the window is in the list, update the window
                         let mut window_to_configure = windows_to_configure.iter().find(|x| x.window_id == w.window_id);
-                        if window_to_configure.is_some() {
+                        if let Some(..) = window_to_configure {
                             let mut window = unsafe { (*el.unwrap()).value };
                             window.x = window_to_configure.unwrap().x;
                             window.y = window_to_configure.unwrap().y;
@@ -476,7 +479,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                         }
                     }
                     // set the window's border color
-                    unsafe {
+                    /*unsafe {
                         XChangeWindowAttributes(display, w.window_id, CWBorderPixel as c_ulong, &mut XSetWindowAttributes {
                             background_pixmap: 0,
                             background_pixel: 0,
@@ -495,10 +498,16 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                             cursor: 0,
                         });
                     }
+                     */
 
                     // draw the window
                     if !w.is_opening {
-                        draw_x_window(w, display, visual, value, shader_program, src_width, src_height);
+                        if w.window_id != desktop_id {
+                            draw_x_window(w, display, visual, value, shader_program,
+                                          false, 0, 0, r as u32, g as u32, b as u32);
+                        } else {
+                            draw_x_window(w, display, visual, value, shader_program, true, src_width as u32, src_height as u32,0,0,0);
+                        }
                     }
 
                     el = windows.next_element(el.unwrap());
