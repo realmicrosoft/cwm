@@ -150,7 +150,7 @@ pub fn redraw_desktop(display: *mut Display, picture: Picture, desktop: Picture,
     }
 }
 
-pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display, use_mouse_coords: bool, offset_x: i32, offset_y: i32, shader_program: GLuint, force_fullscreen: bool, src_width: u32, src_height: u32, border_r: u32, border_g: u32, border_b: u32) {
+pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display, shader_program: GLuint, force_fullscreen: bool, src_width: u32, src_height: u32, border_r: u32, border_g: u32, border_b: u32) {
     // now unsafe time!
     unsafe {
 
@@ -160,24 +160,6 @@ pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display,
         
         let mut window_x = window.x;
         let mut window_y = window.y;
-
-        if use_mouse_coords {
-            let mut mouse_x = 0;
-            let mut mouse_y = 0;
-            let mut root_return: Window = 0;
-            let mut child_return: Window = 0;
-            let mut win_x_return: i32 = 0;
-            let mut win_y_return: i32 = 0;
-            let mut mask_return: c_uint = 0;
-
-            XQueryPointer(display, window_id, &mut root_return,
-                          &mut child_return, &mut win_x_return, &mut win_y_return,
-                          &mut mouse_x, &mut mouse_y, &mut mask_return);
-
-            window_x = mouse_x as i32 - offset_x;
-            window_y = mouse_y as i32 - offset_y;
-
-        }
 
         let frame_x = (window_x - 10) as f32;
         let frame_y = (window_y - 20) as f32;

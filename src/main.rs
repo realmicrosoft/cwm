@@ -647,12 +647,25 @@ let ev = event.xbutton;
                             let mut window = unsafe { (*el.unwrap()).value };
                             window.hide = false;
                             window.use_actual_position = false;
-                            window.x = holding_window_x;
-                            window.y = holding_window_y;
                             holding_window = w.window_id;
 
-                            holding_window_x_offset = cursor_x;
-                            holding_window_y_offset = cursor_y;
+                            let mut mouse_x = 0;
+                            let mut mouse_y = 0;
+                            let mut root_return: Window = 0;
+                            let mut child_return: Window = 0;
+                            let mut win_x_return: i32 = 0;
+                            let mut win_y_return: i32 = 0;
+                            let mut mask_return: c_uint = 0;
+
+                            unsafe {
+                                XQueryPointer(display, window.window_id, &mut root_return,
+                                              &mut child_return, &mut win_x_return, &mut win_y_return,
+                                              &mut mouse_x, &mut mouse_y, &mut mask_return);
+                                XSync(display, 0);
+                            }
+
+                            holding_window_x_offset = mouse_x;
+                            holding_window_y_offset = mouse_y;
                             unsafe {
                                 XRaiseWindow(display, window.window_id);
                                 XFlush(display);
@@ -667,21 +680,35 @@ let ev = event.xbutton;
                     if holding_window == w.window_id {
                         //println!("holding window");
                         let mut window = unsafe { (*el.unwrap()).value };
+                        let mut mouse_x = 0;
+                        let mut mouse_y = 0;
+                        let mut root_return: Window = 0;
+                        let mut child_return: Window = 0;
+                        let mut win_x_return: i32 = 0;
+                        let mut win_y_return: i32 = 0;
+                        let mut mask_return: c_uint = 0;
+
+                        unsafe {
+                            XQueryPointer(display, window.window_id, &mut root_return,
+                                          &mut child_return, &mut win_x_return, &mut win_y_return,
+                                          &mut mouse_x, &mut mouse_y, &mut mask_return);
+                            XSync(display, 0);
+                        }
                         // move the window to the cursor position (minus the offset)
-                        window.x = cursor_x - holding_window_x_offset;
-                        window.y = cursor_y - holding_window_y_offset;
+                        window.x = mouse_x - holding_window_x_offset;
+                        window.y = mouse_y - holding_window_y_offset;
                         holding_window_x = window.x;
                         holding_window_y = window.y;
-                        draw_x_window(window, true, display, true, holding_window_x_offset, holding_window_y_offset, shader_program,
+                        draw_x_window(window, true, display, shader_program,
                                       false, 0, 0, r as u32, g as u32, b as u32);
                     } else {
                         // draw the window
                         if !w.hide {
                             if w.window_id != desktop_id {
-                                draw_x_window(w, true, display, false, 0, 0, shader_program,
+                                draw_x_window(w, true, display, shader_program,
                                               false, 0, 0, r as u32, g as u32, b as u32);
                             } else {
-                                draw_x_window(w, false, display, false, 0,0, shader_program,
+                                draw_x_window(w, false, display, shader_program,
                                               true, src_width as u32, src_height as u32,0,0,0);
                             }
                         }
