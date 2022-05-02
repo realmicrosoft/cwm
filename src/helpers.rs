@@ -150,16 +150,37 @@ pub fn redraw_desktop(display: *mut Display, picture: Picture, desktop: Picture,
     }
 }
 
-pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint, force_fullscreen: bool, src_width: u32, src_height: u32, border_r: u32, border_g: u32, border_b: u32) {
+pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display, use_mouse_coords: bool, offset_x: i32, offset_y: i32, shader_program: GLuint, force_fullscreen: bool, src_width: u32, src_height: u32, border_r: u32, border_g: u32, border_b: u32) {
     // now unsafe time!
     unsafe {
 
 
         let window_id = window.window_id;
         let frame_id = window.frame_id;
+        
+        let mut window_x = window.x;
+        let mut window_y = window.y;
 
-        let frame_x = (window.x - 10) as f32;
-        let frame_y = (window.y - 20) as f32;
+        if use_mouse_coords {
+            let mut mouse_x = 0;
+            let mut mouse_y = 0;
+            let mut root_return: Window = 0;
+            let mut child_return: Window = 0;
+            let mut win_x_return: i32 = 0;
+            let mut win_y_return: i32 = 0;
+            let mut mask_return: c_uint = 0;
+
+            XQueryPointer(display, window_id, &mut root_return,
+                          &mut child_return, &mut win_x_return, &mut win_y_return,
+                          &mut mouse_x, &mut mouse_y, &mut mask_return);
+
+            window_x = mouse_x as i32 - offset_x;
+            window_y = mouse_y as i32 - offset_y;
+
+        }
+
+        let frame_x = (window_x - 10) as f32;
+        let frame_y = (window_y - 20) as f32;
         let frame_width = (window.width + 20) as f32;
         let frame_height = (window.height + 25) as f32;
 
@@ -255,20 +276,20 @@ pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display,
             glColor3f(border_r as f32 / 255.0, border_g as f32 / 255.0, border_b as f32 / 255.0);
 
             // top left to bottom left
-            glVertex2f(window.x as GLfloat, window.y as GLfloat);
-            glVertex2f(window.x as GLfloat, (window.y + window.height as i32) as GLfloat);
+            glVertex2f(window_x as GLfloat, window_y as GLfloat);
+            glVertex2f(window_x as GLfloat, (window_y + window.height as i32) as GLfloat);
 
             // top left to top right
-            glVertex2f(window.x as GLfloat, window.y as GLfloat);
-            glVertex2f((window.x + window.width as i32) as GLfloat, window.y as GLfloat);
+            glVertex2f(window_x as GLfloat, window_y as GLfloat);
+            glVertex2f((window_x + window.width as i32) as GLfloat, window_y as GLfloat);
 
             // top right to bottom right
-            glVertex2f((window.x + window.width as i32) as GLfloat, window.y as GLfloat);
-            glVertex2f((window.x + window.width as i32) as GLfloat, (window.y + window.height as i32) as GLfloat);
+            glVertex2f((window_x + window.width as i32) as GLfloat, window_y as GLfloat);
+            glVertex2f((window_x + window.width as i32) as GLfloat, (window_y + window.height as i32) as GLfloat);
 
             // bottom right to bottom left
-            glVertex2f((window.x + window.width as i32) as GLfloat, (window.y + window.height as i32) as GLfloat);
-            glVertex2f(window.x as GLfloat, (window.y + window.height as i32) as GLfloat);
+            glVertex2f((window_x + window.width as i32) as GLfloat, (window_y + window.height as i32) as GLfloat);
+            glVertex2f(window_x as GLfloat, (window_y + window.height as i32) as GLfloat);
 
             glEnd();
             glEnable(GL_TEXTURE_2D);
@@ -310,17 +331,17 @@ pub fn draw_x_window(window: CumWindow, draw_frame: bool, display: *mut Display,
 
         if !force_fullscreen {
             glTexCoord2d(1.0, 0.0); // top right of the drawing area
-            glVertex2d((window.x as i32 + window.width as i32) as GLdouble, window.y as GLdouble);
+            glVertex2d((window_x as i32 + window.width as i32) as GLdouble, window_y as GLdouble);
 
             glTexCoord2d(1.0, 1.0); // bottom right of the drawing area
-            glVertex2d((window.x as i32 + window.width as i32) as GLdouble, (window.y as i32 + window.height as i32) as GLdouble);
+            glVertex2d((window_x as i32 + window.width as i32) as GLdouble, (window_y as i32 + window.height as i32) as GLdouble);
 
             glTexCoord2d(0.0, 1.0); // bottom left of the drawing area
 
-            glVertex2d(window.x as GLdouble, (window.y as i32 + window.height as i32) as GLdouble);
+            glVertex2d(window_x as GLdouble, (window_y as i32 + window.height as i32) as GLdouble);
 
             glTexCoord2d(0.0, 0.0); // top left of the drawing area
-            glVertex2d(window.x as GLdouble, window.y as GLdouble);
+            glVertex2d(window_x as GLdouble, window_y as GLdouble);
         } else { // use src_width and src_height to get the size of the fullscreen window
             glTexCoord2d(1.0, 0.0); // top right of the drawing area
             glVertex2d(src_width as GLdouble, 0.0);
