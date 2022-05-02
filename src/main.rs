@@ -13,7 +13,7 @@ use stb_image::image::LoadResult;
 use fast_image_resize as fr;
 use libsex::bindings::{CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_COLOR_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_PROJECTION, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, QueuedAfterFlush, QueuedAlready, Screen, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XMapWindow, XNextEvent, XOpenDisplay, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
 use crate::types::CumWindow;
-use crate::helpers::{allow_input_passthrough, draw_x_window, get_window_fb_config, rgba_to_bgra};
+use crate::helpers::{allow_input_passthrough, draw_x_window, get_window_fb_config, redraw_desktop, rgba_to_bgra};
 use crate::linkedlist::LinkedList;
 use crate::setup::{setup_compositing, setup_desktop, setup_glx};
 
@@ -113,7 +113,7 @@ fn main() {
         XSync(display, 0);
     }
 
-    let desktop_id = unsafe { setup_desktop(display, gc, screen, pict_format, root, src_width as u16, src_height as u16) };
+    let (desktop_id, desktop_picture) = unsafe { setup_desktop(display, gc, screen, pict_format, root, src_width as u16, src_height as u16) };
 
     unsafe {
         XSync(display, 0);
@@ -237,10 +237,8 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
 
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
-        glOrtho(-1.25, 1.25, -1.25, 1.25, 1.0, 20.0);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-        gluLookAt(0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+        // make top left corner as origin
+        glOrtho(0.0, src_width as f64, src_height as f64, 0.0, -1.0, 1.0);
     }
 
     loop {
@@ -356,7 +354,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                         });
                         need_redraw = true;
                     }
-                    19 => { // expose
+                    19 => { // mapnotify
                         // add to windows to open
                         println!("map notify");
                         windows_to_open.push(event.xmap.window);
@@ -367,6 +365,20 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
                         // add to windows to close
                         println!("unmap notify");
                         windows_to_hide.push(event.xunmap.window);
+
+                        need_redraw = true;
+                    },
+                    12 => { // expose
+                        // if window is desktop, redraw
+                        if event.xexpose.window == desktop_id {
+                            redraw_desktop(display, desktop_picture, desktop_id, pict_format, src_width as u32, src_height as u32);
+                        } else {
+                            // add to windows to open
+                            windows_to_open.push(event.xexpose.window);
+                        }
+
+                        // map the window
+                        XMapWindow(display, event.xexpose.window);
 
                         need_redraw = true;
                     },
@@ -484,7 +496,7 @@ gl_FragColor = texture2D(tex, Texcoord) * vec4(Color, 1.0);
 
                     // draw the window
                     if !w.is_opening {
-                        draw_x_window(w, display, visual, value, shader_program);
+                        draw_x_window(w, display, visual, value, shader_program, src_width, src_height);
                     }
 
                     el = windows.next_element(el.unwrap());

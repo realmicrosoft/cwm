@@ -124,7 +124,33 @@ unsafe fn XDestroyImage(p0: *mut XImage) {
     XFree(p0 as *mut c_void);
 }
 
-pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint) {
+pub fn redraw_desktop(display: *mut Display, picture: Picture, desktop: Picture, pict_format: *mut XRenderPictFormat, src_width: u32, src_height: u32) {
+// get picture of desktop
+    let picture_desktop = unsafe {
+        XRenderCreatePicture(display, desktop, pict_format, CPSubwindowMode as c_ulong, &XRenderPictureAttributes{
+            repeat: 0,
+            alpha_map: 0,
+            alpha_x_origin: 0,
+            alpha_y_origin: 0,
+            clip_x_origin: 0,
+            clip_y_origin: 0,
+            clip_mask: 0,
+            graphics_exposures: 0,
+            subwindow_mode: IncludeInferiors as c_int,
+            poly_edge: 0,
+            poly_mode: 0,
+            dither: 0,
+            component_alpha: 0
+        })
+    };
+    // copy picture to desktop
+    unsafe {
+        XRenderComposite(display, PictOpSrc as c_int, picture, 0, picture_desktop,
+                         0, 0, 0, 0, 0, 0, src_width as c_uint, src_height as c_uint);
+    }
+}
+
+pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVisualInfo, value: c_int, shader_program: GLuint, src_width: i32, src_height: i32) {
     // now unsafe time!
     unsafe {
         let window_id = window.window_id;
@@ -210,19 +236,22 @@ pub fn draw_x_window(window: CumWindow, display: *mut Display, visual: *mut XVis
             err = glGetError();
         }
 
+        // bottom left is the origin, however, we want to draw from the top left
+        // convert to opengl coordinates
+
         glBegin(GL_QUADS);
 
-        glTexCoord2d(1.0, 0.0);
-        glVertex2d(0.5, 0.5);
+        glTexCoord2d(1.0, 1.0); // top right
+        glVertex2d(0.0, 0.0);
 
-        glTexCoord2d(1.0, 1.0);
-        glVertex2d(0.5, -0.5);
+        glTexCoord2d(1.0, 0.0); // bottom right
+        glVertex2d(0.0, height as GLdouble);
 
-        glTexCoord2d(0.0, 1.0);
-        glVertex2d(-0.5, -0.5);
+        glTexCoord2d(0.0, 0.0); // bottom left
+        glVertex2d(width as GLdouble, height as GLdouble);
 
-        glTexCoord2d(0.0, 0.0);
-        glVertex2d(-0.5, 0.5);
+        glTexCoord2d(0.0, 1.0); // top left
+        glVertex2d(width as GLdouble, 0.0);
 
         glEnd();
 
