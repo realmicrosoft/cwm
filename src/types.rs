@@ -19,5 +19,5 @@ pub struct CumWindow {
 #[derive(Clone, Copy)]
 pub struct XVelocity {
     pub x_speed: f64, // the x speed of the window
-    pub last_x_location: f64, // the last x location of the window (for calculating the speed)
+    pub last_x_location: i32, // the last x location of the window (for calculating the speed)
 }

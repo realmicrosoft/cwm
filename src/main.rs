@@ -139,7 +139,7 @@ fn main() {
         event: None,
         velocity: XVelocity{
             x_speed: 0.0,
-            last_x_location: 0.0,
+            last_x_location: 0,
         }
     };
 
@@ -360,7 +360,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                                     event: None,
                                     velocity: XVelocity{
                                         x_speed: 0.0,
-                                        last_x_location: ev.x as f64,
+                                        last_x_location: ev.x as i32,
                                     }
                                 }).expect("failed to add window");
                                 need_redraw = true;
@@ -412,7 +412,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 event: Some(event),
                                 velocity: XVelocity {
                                     x_speed: 0.0,
-                                    last_x_location: 0.0,
+                                    last_x_location: 0,
                                 }
                             });
                             need_redraw = true;
@@ -448,7 +448,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 event: Some(event),
                                 velocity: XVelocity {
                                     x_speed: 0.0,
-                                    last_x_location: 0.0,
+                                    last_x_location: 0,
                                 }
                             });
                             need_redraw = true;
@@ -699,7 +699,6 @@ gl_FragColor = texture2D(tex, Texcoord);
                     // is this a window being held?
                     if holding_window == w.window_id {
                         //println!("holding window");
-                        let mut window = unsafe { (*el.unwrap()).value };
                         let mut mouse_x = 0;
                         let mut mouse_y = 0;
                         let mut root_return: Window = 0;
@@ -709,17 +708,17 @@ gl_FragColor = texture2D(tex, Texcoord);
                         let mut mask_return: c_uint = 0;
 
                         unsafe {
-                            XQueryPointer(display, window.window_id, &mut root_return,
+                            XQueryPointer(display, w.window_id, &mut root_return,
                                           &mut child_return, &mut win_x_return, &mut win_y_return,
                                           &mut mouse_x, &mut mouse_y, &mut mask_return);
                             XSync(display, 0);
                         }
                         // move the window to the cursor position (minus the offset)
-                        window.x = win_x_return - holding_window_x_offset;
-                        window.y = win_y_return - holding_window_y_offset;
-                        holding_window_x = window.x;
-                        holding_window_y = window.y;
-                        draw_x_window(window, true, display, shader_program,
+                        w.x = win_x_return - holding_window_x_offset;
+                        w.y = win_y_return - holding_window_y_offset;
+                        holding_window_x = w.x;
+                        holding_window_y = w.y;
+                        draw_x_window(w, true, display, shader_program,
                                       false, 0, 0, r as u32, g as u32, b as u32);
                     } else {
                         // draw the window
@@ -732,6 +731,15 @@ gl_FragColor = texture2D(tex, Texcoord);
                                               true, src_width as u32, src_height as u32,0,0,0);
                             }
                         }
+                    }
+
+                    if w.x != w.velocity.last_x_location {
+                        w.velocity.x_speed -= (w.x - w.velocity.last_x_location) as f64 * 0.1;
+                        w.velocity.last_x_location = w.x;
+                        windows.change_element_at_index(i, w);
+                    } else if w.velocity.x_speed != 0.0 {
+                        w.velocity.x_speed = w.velocity.x_speed * 0.7;
+                        windows.change_element_at_index(i, w);
                     }
 
                     el = windows.next_element(el.unwrap());
