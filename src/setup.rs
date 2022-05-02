@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use std::os::raw::{c_char, c_int, c_long, c_uint, c_ulong};
 use std::{mem, ptr};
 use std::ptr::{null, null_mut};
-use libsex::bindings::{_XImage_funcs, _XTransform, AllocNone, CompositeRedirectAutomatic, CompositeRedirectManual, CopyFromParent, CPSubwindowMode, CWColormap, CWEventMask, Display, ExposureMask, GC, GCForeground, GCGraphicsExposures, GL_FALSE, GLbyte, GLfloat, GLubyte, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, GLXDrawable, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetProcAddress, glXGetProcAddressARB, glXGetVisualFromFBConfig, glXMakeCurrent, IncludeInferiors, InputOutput, LSBFirst, PictFormat, PictOpSrc, Picture, PropertyChangeMask, Screen, ShapeBounding, ShapeInput, StructureNotifyMask, SubstructureNotifyMask, SubstructureRedirectMask, Visual, VisualNoMask, Window, X_RenderQueryPictFormats, XChangeWindowAttributes, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultDepth, XDefaultDepthOfScreen, XDefaultRootWindow, XDefaultVisual, XDefaultVisualOfScreen, XDestroyWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XFlush, XFree, XFreePixmap, XGCValues, XGetErrorText, XGetVisualInfo, XImage, XInitImage, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderDirectFormat, XRenderFindVisualFormat, XRenderPictFormat, XRenderPictureAttributes, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSelectInput, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
+use libsex::bindings::{_XImage_funcs, _XTransform, AllocNone, CompositeRedirectAutomatic, CompositeRedirectManual, CopyFromParent, CPSubwindowMode, CWColormap, CWEventMask, Display, ExposureMask, GC, GCForeground, GCGraphicsExposures, GL_FALSE, GLbyte, GLfloat, GLubyte, glViewport, GLX_BIND_TO_TEXTURE_RGB_EXT, GLX_BIND_TO_TEXTURE_RGBA_EXT, GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_DEPTH_SIZE, GLX_DOUBLEBUFFER, GLX_DRAWABLE_TYPE, GLX_NONE, GLX_PIXMAP_BIT, GLX_RED_SIZE, GLX_RGBA, GLX_TEXTURE_2D_BIT_EXT, GLX_Y_INVERTED_EXT, glXChooseVisual, GLXContext, glXCreateContext, GLXDrawable, glXGetFBConfigAttrib, glXGetFBConfigs, glXGetProcAddress, glXGetProcAddressARB, glXGetVisualFromFBConfig, glXMakeCurrent, IncludeInferiors, InputOutput, LSBFirst, PictFormat, PictOpSrc, Picture, PropertyChangeMask, Screen, ShapeBounding, ShapeInput, StructureNotifyMask, SubstructureNotifyMask, SubstructureRedirectMask, Visual, VisualNoMask, Window, X_RenderQueryPictFormats, XChangeWindowAttributes, XCompositeGetOverlayWindow, XCompositeQueryExtension, XCompositeRedirectSubwindows, XCopyPlane, XCreateBitmapFromData, XCreateColormap, XCreateGC, XCreateImage, XCreatePixmap, XCreateWindow, XDefaultDepth, XDefaultDepthOfScreen, XDefaultRootWindow, XDefaultVisual, XDefaultVisualOfScreen, XDestroyWindow, XFixed, XFixesCreateRegion, XFixesDestroyRegion, XFixesSetWindowShapeRegion, XFixesShowCursor, XFlush, XFree, XFreePixmap, XGCValues, XGetErrorText, XGetVisualInfo, XImage, XInitImage, XLowerWindow, XMapWindow, XOpenDisplay, XPutImage, XRenderComposite, XRenderCreatePicture, XRenderDirectFormat, XRenderFindVisualFormat, XRenderPictFormat, XRenderPictureAttributes, XRenderSetPictureTransform, XReparentWindow, XRootWindow, XScreenNumberOfScreen, XSelectInput, XSetErrorHandler, XSetWindowAttributes, XSync, XTransform, XVisualIDFromVisual, XVisualInfo, ZPixmap};
 use stb_image::image::LoadResult;
 use crate::{allow_input_passthrough, fr, get_window_fb_config, rgba_to_bgra};
 use crate::helpers::redraw_desktop;
@@ -23,7 +23,23 @@ pub fn setup_compositing(display: *mut Display, root: Window) -> (Window, GC) {
     }
     // enable events
     unsafe {
-        XSelectInput(display, root, (SubstructureNotifyMask) as c_long);
+        XChangeWindowAttributes(display, root, CWEventMask as c_ulong, &mut XSetWindowAttributes {
+            background_pixmap: 0,
+            background_pixel: 0,
+            border_pixmap: 0,
+            border_pixel: 0,
+            bit_gravity: 0,
+            win_gravity: 0,
+            backing_store: 0,
+            backing_planes: 0,
+            backing_pixel: 0,
+            save_under: 0,
+            event_mask: SubstructureNotifyMask as c_long,
+            do_not_propagate_mask: 0,
+            override_redirect: 0,
+            colormap: 0,
+            cursor: 0
+        });
     }
 
     // enable bigreq extension todo: check if this is needed
@@ -235,6 +251,7 @@ pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_fo
     }
 
     redraw_desktop(display, picture, desktop, pict_format, src_width as u32, src_height as u32);
+    //allow_input_passthrough(display, desktop, 0, 0);
 
     unsafe {
         XSync(display, 0);
@@ -243,6 +260,7 @@ pub fn setup_desktop(display: *mut Display, gc: GC, screen: *mut Screen, pict_fo
     // map the window
     unsafe {
         XMapWindow(display, desktop);
+        XLowerWindow(display, desktop);
     }
 
     (desktop, picture)

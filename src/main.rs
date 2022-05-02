@@ -12,8 +12,8 @@ use std::ptr::{null, null_mut};
 use std::time::SystemTime;
 use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use libsex::bindings::{CopyFromParent, CWBackPixel, CWBackPixmap, CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_BLEND, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_ONE_MINUS_SRC_ALPHA, GL_PROJECTION, GL_SRC_ALPHA, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, glBlendFunc, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnable, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, gluOrtho2D, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, InputOutput, PictTypeDirect, QueuedAfterFlush, QueuedAlready, Screen, Visual, Window, XChangeWindowAttributes, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XMapWindow, XMoveWindow, XNextEvent, XOpenDisplay, XRenderFindVisualFormat, XResizeWindow, XRootWindowOfScreen, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
-use crate::types::CumWindow;
+use libsex::bindings::{ClientMessage, CopyFromParent, CWBackPixel, CWBackPixmap, CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_BLEND, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_ONE_MINUS_SRC_ALPHA, GL_PROJECTION, GL_SRC_ALPHA, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, glBlendFunc, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnable, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, gluOrtho2D, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, InputOutput, PictTypeDirect, PlaceOnTop, QueuedAfterFlush, QueuedAlready, Screen, Visual, Window, XChangeWindowAttributes, XCirculateSubwindows, XClientMessageEvent, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XLowerWindow, XMapWindow, XMoveWindow, XNextEvent, XOpenDisplay, XRaiseWindow, XRenderFindVisualFormat, XResizeWindow, XRootWindowOfScreen, XSendEvent, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
+use crate::types::{CumWindow};
 use crate::helpers::{allow_input_passthrough, draw_x_window, get_window_fb_config, redraw_desktop, rgba_to_bgra};
 use crate::linkedlist::LinkedList;
 use crate::setup::{setup_compositing, setup_desktop, setup_glx};
@@ -133,9 +133,13 @@ fn main() {
         window_id: desktop_id,
         frame_id: 0,
         fbconfig,
-        is_opening: false,
+        hide: false,
         has_alpha: true,
+        use_actual_position: false,
+        event: None,
     };
+
+    // rather use more memory than lose performance
 
     let mut frame_windows: Vec<Window> = Vec::new();
     let mut windows_to_destroy: Vec<Window> = Vec::new();
@@ -316,6 +320,10 @@ gl_FragColor = texture2D(tex, Texcoord);
                                     XMapWindow(display, frame_id);
                                 }
 
+                                // raise the actual window
+                                unsafe {
+                                    XRaiseWindow(display, ev.window);
+                                }
 
                                 // add to the list of frames
                                 frame_windows.push(frame_id);
@@ -331,9 +339,11 @@ gl_FragColor = texture2D(tex, Texcoord);
                                     y: ev.y as i32,// - 10,
                                     width: ev.width as u16,
                                     height: ev.height as u16,
-                                    is_opening: true,
+                                    hide: true,
                                     has_alpha: ( (*format).type_ == PictTypeDirect as c_int && (*format).direct.alphaMask != 0 ),
                                     fbconfig,
+                                    use_actual_position: true,
+                                    event: None,
                                 }).expect("failed to add window");
                                 need_redraw = true;
                             }
@@ -354,8 +364,9 @@ gl_FragColor = texture2D(tex, Texcoord);
                             need_redraw = true;
                         }
                     }
-                    22 => { // configurenotify
+                    22 => { // configure notify
                         let ev = event.xconfigure;
+                        println!("configured window!");
                         // check if this is a frame window
                         if !frame_windows.contains(ev.window.borrow()) {
                             // check if the window is the root window
@@ -377,13 +388,48 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 window_id: ev.window,
                                 frame_id: 0,
                                 fbconfig,
-                                is_opening: true,
+                                hide: false,
                                 has_alpha: ( (*format).type_ == PictTypeDirect as c_int && (*format).direct.alphaMask != 0 ),
+                                use_actual_position: true,
+                                event: Some(event),
                             });
                             need_redraw = true;
                         }
                     }
-                    19 => { // mapnotify
+                    23 => { // configure request
+                        let ev = event.xconfigure;
+                        println!("configure request!");
+                        // check if this is a frame window
+                        if !frame_windows.contains(ev.window.borrow()) {
+                            // check if the window is the root window
+                            if ev.window == root {
+                                src_height = ev.height;
+                                src_width = ev.width;
+                                // todo: resize the sdl window (do we still need to do this?)
+                            }
+                            let fbconfig = get_window_fb_config(ev.window, display, screen);
+                            let mut attribs : mem::MaybeUninit<XWindowAttributes> = mem::MaybeUninit::uninit();
+                            XGetWindowAttributes(display, ev.window, attribs.as_mut_ptr());
+                            let format = XRenderFindVisualFormat(display, attribs.assume_init().visual);
+                            // add to windows to configure
+                            windows_to_configure.push(CumWindow {
+                                x: ev.x as i32,
+                                y: ev.y as i32,
+                                width: ev.width as u16,
+                                height: ev.height as u16,
+                                window_id: ev.window,
+                                frame_id: 0,
+                                fbconfig,
+                                hide: false,
+                                has_alpha: ( (*format).type_ == PictTypeDirect as c_int && (*format).direct.alphaMask != 0 ),
+                                use_actual_position: true,
+                                event: Some(event),
+                            });
+                            need_redraw = true;
+                        }
+                        XFlush(display);
+                    },
+                    19 => { // map notify
                         // add to windows to open
                         println!("map notify");
                         if !frame_windows.contains(event.xmap.window.borrow()) {
@@ -391,6 +437,13 @@ gl_FragColor = texture2D(tex, Texcoord);
 
                             need_redraw = true;
                         }
+                        XFlush(display);
+                    },
+                    20 => { // map request
+                        // add to windows to open
+                        println!("map request");
+                        XSendEvent(display, event.xmaprequest.window, 0, 0, &mut event);
+                        XFlush(display);
                     },
                     18 => { // unmapnotify
                         // add to windows to close
@@ -413,10 +466,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 windows_to_open.push(event.xexpose.window);
                             }
                         }
-
-                        // map the window
                         XMapWindow(display, event.xexpose.window);
-
                         need_redraw = true;
                     },
                     4 => { // button press
@@ -431,7 +481,30 @@ gl_FragColor = texture2D(tex, Texcoord);
                         // move cursor position
                         cursor_x = ev.x_root;
                         cursor_y = ev.y_root;
-                    }
+                    },
+                    25 => { // resize request (resize the frame but otherwise pass it on)
+                        println!("resize request");
+                        let ev = event.xresizerequest;
+                        // check if this is a frame window
+                        XSendEvent(display, ev.window, 0, 0, &mut event);
+                        //if frame_windows.contains(ev.window.borrow()) {
+                         //   XResizeWindow(display, ev.window, ev.width as c_uint, ev.height as c_uint);
+                        //}
+                        XFlush(display);
+                        need_redraw = true;
+                    },
+                    27 => { // circulation request (just pass it along for now)
+                        println!("circulation request");
+                        let ev = event.xcirculaterequest;
+                        XSendEvent(display, ev.window, 0, 0, &mut event);
+                        XFlush(display);
+                    },
+                    30 => { // selection request (i don't know what this does so just pass it along)
+                        println!("selection request");
+                        let ev = event.xselectionrequest;
+                        XSendEvent(display, ev.owner, 0, 0, &mut event);
+                        XFlush(display);
+                    },
                     _ => {
                         println!("unhandled event");
                         println!("{:?}", event.type_);
@@ -487,13 +560,13 @@ gl_FragColor = texture2D(tex, Texcoord);
                 } else if windows_to_open.contains(&w.window_id) {
                     println!("completely opening window");
                     let mut window = unsafe { (*el.unwrap()).value };
-                    window.is_opening = false;
+                    window.hide = false;
                     windows.change_element_at_index(i, window).expect("Error changing window");
                     windows_to_open.retain(|x| x != &w.window_id);
                 } else if windows_to_hide.contains(&w.window_id) {
                     println!("completely hiding window");
                     let mut window = unsafe { (*el.unwrap()).value };
-                    window.is_opening = true;
+                    window.hide = true;
                     windows.change_element_at_index(i, window).expect("Error changing window");
                     windows_to_hide.retain(|x| x != &w.window_id);
                 } else {
@@ -503,10 +576,12 @@ gl_FragColor = texture2D(tex, Texcoord);
                         let mut window_to_configure = windows_to_configure.iter().find(|x| x.window_id == w.window_id);
                         if let Some(..) = window_to_configure {
                             let mut window = unsafe { (*el.unwrap()).value };
-                            window.x = window_to_configure.unwrap().x;
-                            window.y = window_to_configure.unwrap().y;
-                            window.width = window_to_configure.unwrap().width;
-                            window.height = window_to_configure.unwrap().height;
+                            if window.use_actual_position {
+                                window.x = window_to_configure.unwrap().x;
+                                window.y = window_to_configure.unwrap().y;
+                                window.width = window_to_configure.unwrap().width;
+                                window.height = window_to_configure.unwrap().height;
+                            }
                             window.has_alpha = window_to_configure.unwrap().has_alpha;
                             windows.change_element_at_index(i, window).expect("Error changing window");
 
@@ -516,39 +591,22 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 XResizeWindow(display, window.frame_id, (window.width + 20) as c_uint, (window.height + 25) as c_uint);
                             }
 
+                            // send the configure event to the window
+                            if let Some(..) = window.event {
+                                let mut event = window.event.unwrap();
+                                unsafe {
+                                    XSendEvent(display, window.window_id, 0, 0, &mut event);
+                                    XFlush(display);
+                                }
+                            }
+
                             windows_to_configure.retain(|x| x.window_id != w.window_id);
                         }
                     }
 
                     // draw the window
-                    if !w.is_opening {
+                    if !w.hide {
                         if w.window_id != desktop_id {
-                            // move the window x and y by +1
-                            /*let future_x = w.x + 1;
-                            let future_y = w.y + 1;
-
-                            // if the future_x or future_y is greater than the screen width or height,
-                            // move the window back to the start
-                            w.x = future_x;
-                            w.y = future_y;
-                            if future_x > src_width as i32 {
-                                w.x = (0 - w.width as i32);
-                            }
-                            if future_y > src_height as i32 {
-                                w.y = (0 - w.height as i32);
-                            }
-
-                            unsafe { XConfigureWindow(display, w.window_id, (CWX | CWY), &mut XWindowChanges{
-                                x: w.x as c_int,
-                                y: w.y as c_int,
-                                width: 0,
-                                height: 0,
-                                border_width: 0,
-                                sibling: 0,
-                                stack_mode: 0,
-                            }) };
-                             */
-
                             draw_x_window(w, true, display, visual, value, shader_program,
                                           false, 0, 0, r as u32, g as u32, b as u32);
                         } else {
