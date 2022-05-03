@@ -564,155 +564,157 @@ gl_FragColor = texture2D(tex, Texcoord);
                 }
                 let mut w = unsafe { (*el.unwrap()).value };
                 // if we need to destroy this window, do so
-                if windows_to_destroy.contains(&w.window_id) {
-                    println!("completely destroying window");
-                    windows.remove_at_index(i).expect("Error removing window");
-                    windows_to_destroy.retain(|&x| x != w.window_id);
-                    el = windows.index(0);
-                    i = 0;
-                } else if windows_to_open.contains(&w.window_id) {
-                    println!("completely opening window");
-                    let mut window = unsafe { (*el.unwrap()).value };
-                    window.hide = false;
-                    windows.change_element_at_index(i, window).expect("Error changing window");
-                    windows_to_open.retain(|x| x != &w.window_id);
-                } else if windows_to_hide.contains(&w.window_id) {
-                    println!("completely hiding window");
-                    let mut window = unsafe { (*el.unwrap()).value };
-                    window.hide = true;
-                    windows.change_element_at_index(i, window).expect("Error changing window");
-                    windows_to_hide.retain(|x| x != &w.window_id);
-                } else if windows_to_finally_move.contains(&w.window_id) {
-                    println!("finally moving window");
-                    let mut window = unsafe { (*el.unwrap()).value };
-                    unsafe {
-                        XMoveWindow(display, window.window_id, holding_window_x as c_int, holding_window_y as c_int);
-                        XSync(display, 0);
+                if !windows_to_destroy.is_empty() {
+                    if windows_to_destroy.contains(&w.window_id) {
+                        println!("completely destroying window");
+                        windows.remove_at_index(i).expect("Error removing window");
+                        windows_to_destroy.retain(|&x| x != w.window_id);
+                        el = windows.index(0);
+                        i = 0;
                     }
-                    window.use_actual_position = true;
-                    window.x = holding_window_x;
-                    window.y = holding_window_y;
-                    windows.change_element_at_index(i, window).expect("Error changing window");
-                    windows_to_finally_move.retain(|x| x != &w.window_id);
-                    holding_window = 0;
-                } else {
-                    // for each window in windows to configure, check the window id
-                    let mut mouse_x = 0;
-                    let mut mouse_y = 0;
-                    let mut root_return: Window = 0;
-                    let mut child_return: Window = 0;
-                    let mut win_x_return: i32 = 0;
-                    let mut win_y_return: i32 = 0;
-                    let mut mask_return: c_uint = 0;
-
-                    unsafe {
-                        XQueryPointer(display, root, &mut root_return,
-                                      &mut child_return, &mut win_x_return, &mut win_y_return,
-                                      &mut mouse_x, &mut mouse_y, &mut mask_return);
-                        XSync(display, 0);
+                } else if !windows_to_open.is_empty() {
+                    if windows_to_open.contains(&w.window_id) {
+                        println!("completely opening window");
+                        let mut window = unsafe { (*el.unwrap()).value };
+                        window.hide = false;
+                        windows.change_element_at_index(i, window).expect("Error changing window");
+                        windows_to_open.retain(|x| x != &w.window_id);
                     }
-
-                    if holding_window != w.window_id {
-                        if windows_to_configure.iter().any(|x| x.window_id == w.window_id) {
-                            // if the window is in the list, update the window
-                            let mut window_to_configure = windows_to_configure.iter().find(|x| x.window_id == w.window_id);
-                            if let Some(..) = window_to_configure {
-                                let mut window = unsafe { (*el.unwrap()).value };
-                                if window.use_actual_position {
-                                    window.x = window_to_configure.unwrap().x;
-                                    window.y = window_to_configure.unwrap().y;
-                                    // move the frame window to the correct position
-                                    unsafe {
-                                        XMoveWindow(display, window.frame_id, window.x - 10, window.y - 20);
-                                    }
-
-                                    // send the configure event to the window
-                                    if let Some(..) = window.event {
-                                        let mut event = window.event.unwrap();
-                                        unsafe {
-                                            //XSendEvent(display, window.window_id, 0, 0, &mut event);
-                                            XFlush(display);
-                                        }
-                                    }
-                                }
-                                window.width = window_to_configure.unwrap().width;
-                                window.height = window_to_configure.unwrap().height;
-
-                                unsafe {
-                                    XResizeWindow(display, window.frame_id, (window.width + 20) as c_uint, (window.height + 25) as c_uint);
-                                }
-
-                                window.has_alpha = window_to_configure.unwrap().has_alpha;
-                                windows.change_element_at_index(i, window).expect("Error changing window");
-
-                                windows_to_configure.retain(|x| x.window_id != w.window_id);
-                            }
-                        }
-
-                        // did the window get picked up?
-                        if child_return == w.frame_id {
-                            println!("picking up window");
-                            last_window_pickup_time = std::time::SystemTime::now();
-                            w.hide = false;
-                            w.use_actual_position = false;
-                            holding_window = w.window_id;
-
-                            holding_window_x_offset = win_x_return as i32 - w.x;
-                            holding_window_y_offset = win_y_return as i32 - w.y;
-                            unsafe {
-                                XRaiseWindow(display, w.frame_id);
-                                XRaiseWindow(display, w.window_id);
-                                XFlush(display);
-                            }
-
-                            windows.change_element_at_index(i, w).expect("Error changing window");
-                        }
+                } else if !windows_to_hide.is_empty() {
+                    if windows_to_hide.contains(&w.window_id) {
+                        println!("completely hiding window");
+                        let mut window = unsafe { (*el.unwrap()).value };
+                        window.hide = true;
+                        windows.change_element_at_index(i, window).expect("Error changing window");
+                        windows_to_hide.retain(|x| x != &w.window_id);
                     }
-
-                    // is this a window being held?
-                    if holding_window == w.window_id {
-                        //println!("holding window");
-                        if mask_return & Button1Mask as u32 == 0 {
-                            // has it been more then half a second since we picked up the window?
-                            if last_window_pickup_time.elapsed().unwrap().as_secs() > 0 {
-                                // if so, move the window
-                                println!("releasing window");
-                                windows_to_finally_move.push(w.window_id);
-                            }
-                        } else {
-                            // move the window to the cursor position (minus the offset)
-                            w.x = mouse_x - holding_window_x_offset;
-                            w.y = mouse_y - holding_window_y_offset;
-                            holding_window_x = w.x;
-                            holding_window_y = w.y;
-                        }
-                        draw_x_window(w, true, display, shader_program,
-                                      false, 0, 0, r as u32, g as u32, b as u32);
-                    } else {
-                        // draw the window
-                        if !w.hide {
-                            if w.window_id != desktop_id {
-                                draw_x_window(w, true, display, shader_program,
-                                              false, 0, 0, r as u32, g as u32, b as u32);
-                            } else {
-                                draw_x_window(w, false, display, shader_program,
-                                              true, src_width as u32, src_height as u32,0,0,0);
-                            }
-                        }
-                    }
-
-                    if w.x != w.velocity.last_x_location {
-                        w.velocity.x_speed -= (w.x - w.velocity.last_x_location) as f64 * 0.1;
-                        w.velocity.last_x_location = w.x;
-                        windows.change_element_at_index(i, w);
-                    } else if w.velocity.x_speed != 0.0 {
-                        w.velocity.x_speed = w.velocity.x_speed * 0.89;
-                        windows.change_element_at_index(i, w);
-                    }
-
-                    el = windows.next_element(el.unwrap());
-                    i += 1;
                 }
+                // for each window in windows to configure, check the window id
+                let mut mouse_x = 0;
+                let mut mouse_y = 0;
+                let mut root_return: Window = 0;
+                let mut child_return: Window = 0;
+                let mut win_x_return: i32 = 0;
+                let mut win_y_return: i32 = 0;
+                let mut mask_return: c_uint = 0;
+
+                unsafe {
+                    XQueryPointer(display, root, &mut root_return,
+                                  &mut child_return, &mut win_x_return, &mut win_y_return,
+                                  &mut mouse_x, &mut mouse_y, &mut mask_return);
+                    XSync(display, 0);
+                }
+
+                if holding_window != w.window_id {
+                    if windows_to_configure.iter().any(|x| x.window_id == w.window_id) {
+                        // if the window is in the list, update the window
+                        let mut window_to_configure = windows_to_configure.iter().find(|x| x.window_id == w.window_id);
+                        if let Some(..) = window_to_configure {
+                            let mut window = unsafe { (*el.unwrap()).value };
+                            if window.use_actual_position {
+                                window.x = window_to_configure.unwrap().x;
+                                window.y = window_to_configure.unwrap().y;
+                                // move the frame window to the correct position
+                                unsafe {
+                                    XMoveWindow(display, window.frame_id, window.x - 10, window.y - 20);
+                                }
+
+                                // send the configure event to the window
+                                if let Some(..) = window.event {
+                                    let mut event = window.event.unwrap();
+                                    unsafe {
+                                        //XSendEvent(display, window.window_id, 0, 0, &mut event);
+                                        XFlush(display);
+                                    }
+                                }
+                            }
+                            window.width = window_to_configure.unwrap().width;
+                            window.height = window_to_configure.unwrap().height;
+
+                            unsafe {
+                                XResizeWindow(display, window.frame_id, (window.width + 20) as c_uint, (window.height + 25) as c_uint);
+                            }
+
+                            window.has_alpha = window_to_configure.unwrap().has_alpha;
+                            windows.change_element_at_index(i, window).expect("Error changing window");
+
+                            windows_to_configure.retain(|x| x.window_id != w.window_id);
+                        }
+                    }
+
+                    // did the window get picked up?
+                    if (child_return == w.frame_id || root_return == w.frame_id) && w.window_id != desktop_id && mask_return & Button1Mask as u32 != 0 {
+                        println!("picking up window");
+                        last_window_pickup_time = std::time::SystemTime::now();
+                        w.hide = false;
+                        w.use_actual_position = false;
+                        holding_window = w.window_id;
+
+                        holding_window_x_offset = win_x_return as i32 - w.x;
+                        holding_window_y_offset = win_y_return as i32 - w.y;
+                        unsafe {
+                            XRaiseWindow(display, w.frame_id);
+                            XRaiseWindow(display, w.window_id);
+                            XFlush(display);
+                        }
+
+                        windows.change_element_at_index(i, w).expect("Error changing window");
+                    }
+                }
+
+                // is this a window being held?
+                if holding_window == w.window_id {
+                    //println!("holding window");
+                    let mut dont_move = false;
+                    if mask_return & Button1Mask as u32 == 0 {
+                        // if so, move the window
+                        println!("releasing window");
+                        unsafe {
+                            XMoveWindow(display, w.window_id, holding_window_x as c_int, holding_window_y as c_int);
+                            XSync(display, 0);
+                        }
+                        w.use_actual_position = true;
+                        w.x = holding_window_x;
+                        w.y = holding_window_y;
+                        windows.change_element_at_index(i, w).expect("Error changing window");
+                        windows_to_finally_move.retain(|x| x != &w.window_id);
+                        holding_window = 0;
+                        dont_move = true;
+                    }
+                    if !dont_move {
+                        // move the window to the cursor position (minus the offset)
+                        w.x = mouse_x - holding_window_x_offset;
+                        w.y = mouse_y - holding_window_y_offset;
+                        holding_window_x = w.x;
+                        holding_window_y = w.y;
+                    }
+                    draw_x_window(w, true, display, shader_program,
+                                  false, 0, 0, r as u32, g as u32, b as u32);
+                } else {
+                    // draw the window
+                    if !w.hide {
+                        if w.window_id != desktop_id {
+                            draw_x_window(w, true, display, shader_program,
+                                          false, 0, 0, r as u32, g as u32, b as u32);
+                        } else {
+                            draw_x_window(w, false, display, shader_program,
+                                          true, src_width as u32, src_height as u32,0,0,0);
+                        }
+                    }
+                }
+
+                if w.x != w.velocity.last_x_location {
+                    w.velocity.x_speed -= (w.x - w.velocity.last_x_location) as f64 * 0.1;
+                    w.velocity.last_x_location = w.x;
+                    windows.change_element_at_index(i, w);
+                } else if w.velocity.x_speed != 0.0 {
+                    w.velocity.x_speed = w.velocity.x_speed * 0.89;
+                    windows.change_element_at_index(i, w);
+                }
+
+                el = windows.next_element(el.unwrap());
+                i += 1;
+
             }
 
             // we don't want to accidentally destroy a window, so clear the windows to destroy list
