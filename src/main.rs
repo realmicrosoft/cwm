@@ -6,24 +6,41 @@ mod setup;
 use std::borrow::Borrow;
 use std::ffi::{c_void, CStr};
 use std::mem;
-use std::num::NonZeroU32;
 use std::os::raw::{c_char, c_int, c_uint, c_ulong};
 use std::ptr::{null, null_mut};
 use std::time::SystemTime;
-use stb_image::image::LoadResult;
 use fast_image_resize as fr;
-use libsex::bindings::{AnyModifier, Button1Mask, ButtonPressMask, ButtonReleaseMask, ClientMessage, CopyFromParent, CWBackPixel, CWBackPixmap, CWBorderPixel, CWHeight, CWWidth, CWX, CWY, Display, GL_ARRAY_BUFFER, GL_BLEND, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_MODELVIEW, GL_ONE_MINUS_SRC_ALPHA, GL_PROJECTION, GL_SRC_ALPHA, GL_STATIC_DRAW, GL_VERTEX_SHADER, glAttachShader, glBindBuffer, glBindVertexArray, glBlendFunc, GLboolean, glBufferData, GLclampf, glClear, glClearColor, glCompileShader, glCreateProgram, glCreateShader, glDeleteTextures, glEnable, glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays, glGetAttribLocation, glGetUniformLocation, glLinkProgram, glLoadIdentity, glMatrixMode, glOrtho, glShaderSource, GLsizeiptr, GLuint, gluLookAt, gluOrtho2D, glUseProgram, glVertexArrayAttribBinding, glVertexArrayAttribFormat, glViewport, glXSwapBuffers, GrabModeAsync, InputOutput, PictTypeDirect, PlaceOnTop, PointerMotionMask, QueuedAfterFlush, QueuedAlready, Screen, Visual, Window, XChangeWindowAttributes, XCirculateSubwindows, XClientMessageEvent, XCompositeRedirectSubwindows, XConfigureWindow, XCreateWindow, XCreateWindowEvent, XDefaultScreenOfDisplay, XDestroyWindow, XEvent, XEventsQueued, XFlush, XGetErrorText, XGetWindowAttributes, XGrabButton, XLowerWindow, XMapWindow, XMoveWindow, XNextEvent, XOpenDisplay, XQueryPointer, XRaiseWindow, XRenderFindVisualFormat, XResizeWindow, XRootWindowOfScreen, XSendEvent, XSetErrorHandler, XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
+use libsex::bindings::{AnyModifier, Button1Mask, ButtonPressMask, ButtonReleaseMask,
+                       CopyFromParent, CWBackPixel, CWX, CWY,
+                       Display, GL_ARRAY_BUFFER, GL_BLEND, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT,
+                       GL_FALSE, GL_FLOAT, GL_FRAGMENT_SHADER, GL_ONE_MINUS_SRC_ALPHA,
+                       GL_PROJECTION, GL_SRC_ALPHA, GL_STATIC_DRAW, GL_VERTEX_SHADER,
+                       glAttachShader, glBindBuffer, glBindVertexArray, glBlendFunc, GLboolean,
+                       glBufferData, GLclampf, glClear, glClearColor, glCompileShader,
+                       glCreateProgram, glCreateShader, glEnable,
+                       glEnableVertexArrayAttrib, glGenBuffers, glGenVertexArrays,
+                       glGetAttribLocation, glLinkProgram, glLoadIdentity,
+                       glMatrixMode, glShaderSource, GLsizeiptr, GLuint,
+                       gluOrtho2D, glUseProgram, glVertexArrayAttribBinding,
+                       glVertexArrayAttribFormat, glViewport, glXSwapBuffers, GrabModeAsync,
+                       InputOutput, PictTypeDirect, PointerMotionMask,
+                       QueuedAlready, Screen, Visual, Window, XConfigureWindow, XCreateWindow,
+                       XDefaultScreenOfDisplay, XEvent, XEventsQueued, XFlush, XGetErrorText,
+                       XGetWindowAttributes, XGrabButton, XMapWindow, XMoveWindow,
+                       XNextEvent, XOpenDisplay, XQueryPointer, XRaiseWindow, XRenderFindVisualFormat,
+                       XResizeWindow, XRootWindowOfScreen, XSendEvent, XSetErrorHandler,
+                       XSetWindowAttributes, XSync, XWindowAttributes, XWindowChanges};
+
+
 use crate::types::{CumWindow, XVelocity};
 use crate::helpers::{allow_input_passthrough, draw_x_window, get_window_fb_config, redraw_desktop, rgba_to_bgra};
 use crate::linkedlist::LinkedList;
 use crate::setup::{setup_compositing, setup_desktop, setup_glx};
 
-unsafe extern "C" fn error_handler(display: *mut libsex::bindings::Display, error_event: *mut libsex::bindings::XErrorEvent) -> c_int {
-    unsafe {
-        let mut buffer: [c_char; 256] = [0; 256];
-        XGetErrorText(display, (*error_event).error_code as c_int, buffer.as_mut_ptr(), 256);
-        println!("{}", CStr::from_ptr(buffer.as_ptr()).to_str().unwrap());
-    }
+unsafe extern "C" fn error_handler(display: *mut Display, error_event: *mut libsex::bindings::XErrorEvent) -> c_int {
+    let mut buffer: [c_char; 256] = [0; 256];
+    XGetErrorText(display, (*error_event).error_code as c_int, buffer.as_mut_ptr(), 256);
+    println!("{}", CStr::from_ptr(buffer.as_ptr()).to_str().unwrap());
     0
 }
 
@@ -31,18 +48,18 @@ fn main() {
     unsafe {
         XSetErrorHandler(Some(error_handler));
     }
-    let mut display: *mut Display = null_mut();
-    let mut screen: *mut Screen = null_mut();
-    let mut root: Window = 0;
+    let display: *mut Display;
+    let screen: *mut Screen;
+    let root: Window;
     // get stuffz
     unsafe {
         display = XOpenDisplay(null());
-        if display == null_mut() {
+        if display.is_null() {
             println!("could not open display");
             return;
         }
         screen = XDefaultScreenOfDisplay(display);
-        if screen == null_mut() {
+        if screen.is_null() {
             println!("could not get screen");
             return;
         }
@@ -60,8 +77,8 @@ fn main() {
     println!("root: {:?}", root);
 
     // get dimensions
-    let mut src_width = 0;
-    let mut src_height = 0;
+    let mut src_width: c_int;
+    let mut src_height: c_int;
 
     unsafe {
         let mut attr: XWindowAttributes = XWindowAttributes{
@@ -100,21 +117,21 @@ fn main() {
 
     let mut windows = LinkedList::new();
 
-    let mut accent_color = 0xFFFF0000;
+    //let mut accent_color;
 
     let (overlay_window, gc) = setup_compositing(display, root);
     unsafe {
         XSync(display, 0);
     }
 
-    let (ctx, visual, fbconfigs, value, pict_format) =
+    let (_ctx, _visual, _fbconfigs, _value, pict_format) =
         unsafe { setup_glx(display, overlay_window,src_width as u32, src_height as u32, screen) };
 
     unsafe {
         XSync(display, 0);
     }
 
-    let (desktop_id, desktop_picture) = unsafe { setup_desktop(display, gc, screen, pict_format, root, src_width as u16, src_height as u16) };
+    let (desktop_id, desktop_picture) = setup_desktop(display, gc, screen, pict_format, root, src_width as u16, src_height as u16);
 
     unsafe {
         XSync(display, 0);
@@ -122,7 +139,6 @@ fn main() {
     let mut now = SystemTime::now();
     let mut t = 0;
     let mut need_redraw = true;
-    let mut dragging = false;
 
     let fbconfig = unsafe { get_window_fb_config(desktop_id, display, screen) };
     let desktop_window = CumWindow {
@@ -146,7 +162,7 @@ fn main() {
     // rather use more memory than lose performance
 
     let mut frame_windows: Vec<Window> = Vec::new();
-    let mut frame_windows_to_pick_up: Vec<Window> = Vec::new();
+    //let mut frame_windows_to_pick_up: Vec<Window> = Vec::new();
     let mut windows_to_destroy: Vec<Window> = Vec::new();
     let mut windows_to_configure: Vec<CumWindow> = Vec::new();
     let mut windows_to_finally_move: Vec<Window> = Vec::new();
@@ -158,14 +174,14 @@ fn main() {
     let mut holding_window_y_offset: i32 = 0;
     let mut holding_window_x = 0;
     let mut holding_window_y = 0;
-    let mut last_window_pickup_time = std::time::SystemTime::now();
+    //let mut last_window_pickup_time;
 
     let mut r= 0.0f64;
     let mut g= 0.0f64;
     let mut b= 0.0f64;
 
-    let mut cursor_x = 0;
-    let mut cursor_y = 0;
+    //let mut cursor_x = 0;
+    //let mut cursor_y = 0;
 
     unsafe {
         XGrabButton(display, 1, AnyModifier, root, 1, ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
@@ -175,7 +191,7 @@ fn main() {
 
     let mut event: XEvent = unsafe { mem::zeroed() };
 
-    let mut shader_program = 0;
+    let shader_program;
 
     unsafe {
         let vertex_source = "
@@ -295,26 +311,24 @@ gl_FragColor = texture2D(tex, Texcoord);
                                 let centre_y = (src_height / 2) - (ev.height / 2);
                                 // change the main window to be in the centre of the screen
                                 // configure window
-                                unsafe {
-                                    XConfigureWindow(display, ev.window, CWX | CWY, &mut XWindowChanges{
-                                        x: centre_x,
-                                        y: centre_y,
-                                        width: ev.width as c_int,
-                                        height: ev.height as c_int,
-                                        border_width: 1,
-                                        sibling: 0,
-                                        stack_mode: 0
-                                    });
-                                }
+                                XConfigureWindow(display, ev.window, CWX | CWY, &mut XWindowChanges{
+                                    x: centre_x,
+                                    y: centre_y,
+                                    width: ev.width as c_int,
+                                    height: ev.height as c_int,
+                                    border_width: 1,
+                                    sibling: 0,
+                                    stack_mode: 0
+                                });
                                 // create the frame
-                                let frame_id = unsafe {
+                                let frame_id =
                                     XCreateWindow(display, root,
                                                   centre_x - 10, centre_y - 20,
                                                   ev.width as c_uint + 20, ev.height as c_uint + 25,
                                                   0, 24, InputOutput as c_uint,
                                                   CopyFromParent as *mut Visual, CWBackPixel as c_ulong, &mut XSetWindowAttributes{
                                         background_pixmap: 0,
-                                        background_pixel: 0xEFffffff,
+                                        background_pixel: 0xefffffff,
                                         border_pixmap: 0,
                                         border_pixel: 0,
                                         bit_gravity: 0,
@@ -328,17 +342,12 @@ gl_FragColor = texture2D(tex, Texcoord);
                                         override_redirect: 0,
                                         colormap: 0,
                                         cursor: 0
-                                    })
-                                };
+                                    });
                                 // map the window
-                                unsafe {
-                                    XMapWindow(display, frame_id);
-                                }
+                                XMapWindow(display, frame_id);
 
                                 // raise the actual window
-                                unsafe {
-                                    XRaiseWindow(display, ev.window);
-                                }
+                                XRaiseWindow(display, ev.window);
 
                                 // add to the list of frames
                                 frame_windows.push(frame_id);
@@ -420,7 +429,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                         }
                     }
                     23 => { // configure request
-                        let ev = event.xconfigure;
+                        //let ev = event.xconfigure;
                         println!("configure request! (don't care)");
                         XFlush(display);
                     },
@@ -489,10 +498,10 @@ gl_FragColor = texture2D(tex, Texcoord);
                          */
                     },
                     6 => { // motionnotify
-                        let ev = event.xmotion;
+                        //let ev = event.xmotion;
                         // move cursor position
-                        cursor_x = ev.x_root;
-                        cursor_y = ev.y_root;
+                        //cursor_x = ev.x_root;
+                        //cursor_y = ev.y_root;
                         need_redraw = true;
                     },
                     25 => { // resize request (resize the frame but otherwise pass it on)
@@ -530,11 +539,11 @@ gl_FragColor = texture2D(tex, Texcoord);
         if after.duration_since(now).unwrap().as_millis() > (1/60) as u128 {
             // generate the rainbow using a sine wave
             let frequency = 0.05;
-            r = ((frequency * (t as f64) + 0.0).sin() * 127.0f64 + 128.0f64);
-            g = ((frequency * (t as f64) + 2.0).sin() * 127.0f64 + 128.0f64);
-            b = ((frequency * (t as f64) + 4.0).sin() * 127.0f64 + 128.0f64);
+            r = (frequency * (t as f64) + 0.0).sin() * 127.0f64 + 128.0f64;
+            g = (frequency * (t as f64) + 2.0).sin() * 127.0f64 + 128.0f64;
+            b = (frequency * (t as f64) + 4.0).sin() * 127.0f64 + 128.0f64;
 
-            accent_color = ((((r as u32) << 16) | ((g as u32) << 8) | (b as u32)) | 0xFF000000) as u32;
+            //accent_color = ((((r as u32) << 16) | ((g as u32) << 8) | (b as u32)) | 0xFF000000) as u32;
             t += 1;
             need_redraw = true;
             now = after;
@@ -580,14 +589,12 @@ gl_FragColor = texture2D(tex, Texcoord);
                         windows.change_element_at_index(i, window).expect("Error changing window");
                         windows_to_open.retain(|x| x != &w.window_id);
                     }
-                } else if !windows_to_hide.is_empty() {
-                    if windows_to_hide.contains(&w.window_id) {
-                        println!("completely hiding window");
-                        let mut window = unsafe { (*el.unwrap()).value };
-                        window.hide = true;
-                        windows.change_element_at_index(i, window).expect("Error changing window");
-                        windows_to_hide.retain(|x| x != &w.window_id);
-                    }
+                } else if !windows_to_hide.is_empty() && windows_to_hide.contains(&w.window_id) {
+                    println!("completely hiding window");
+                    let mut window = unsafe { (*el.unwrap()).value };
+                    window.hide = true;
+                    windows.change_element_at_index(i, window).expect("Error changing window");
+                    windows_to_hide.retain(|x| x != &w.window_id);
                 }
                 // for each window in windows to configure, check the window id
                 let mut mouse_x = 0;
@@ -608,7 +615,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                 if holding_window != w.window_id {
                     if windows_to_configure.iter().any(|x| x.window_id == w.window_id) {
                         // if the window is in the list, update the window
-                        let mut window_to_configure = windows_to_configure.iter().find(|x| x.window_id == w.window_id);
+                        let window_to_configure = windows_to_configure.iter().find(|x| x.window_id == w.window_id);
                         if let Some(..) = window_to_configure {
                             let mut window = unsafe { (*el.unwrap()).value };
                             if window.use_actual_position {
@@ -621,7 +628,7 @@ gl_FragColor = texture2D(tex, Texcoord);
 
                                 // send the configure event to the window
                                 if let Some(..) = window.event {
-                                    let mut event = window.event.unwrap();
+                                    //let mut event = window.event.unwrap();
                                     unsafe {
                                         //XSendEvent(display, window.window_id, 0, 0, &mut event);
                                         XFlush(display);
@@ -645,7 +652,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                     // did the window get picked up?
                     if (child_return == w.frame_id || root_return == w.frame_id) && w.window_id != desktop_id && mask_return & Button1Mask as u32 != 0 {
                         println!("picking up window");
-                        last_window_pickup_time = std::time::SystemTime::now();
+                        //last_window_pickup_time = SystemTime::now();
                         w.hide = false;
                         w.use_actual_position = false;
                         holding_window = w.window_id;
@@ -706,10 +713,10 @@ gl_FragColor = texture2D(tex, Texcoord);
                 if w.x != w.velocity.last_x_location {
                     w.velocity.x_speed -= (w.x - w.velocity.last_x_location) as f64 * 0.1;
                     w.velocity.last_x_location = w.x;
-                    windows.change_element_at_index(i, w);
+                    windows.change_element_at_index(i, w).expect("Error changing window");
                 } else if w.velocity.x_speed != 0.0 {
-                    w.velocity.x_speed = w.velocity.x_speed * 0.89;
-                    windows.change_element_at_index(i, w);
+                    w.velocity.x_speed *= 0.89;
+                    windows.change_element_at_index(i, w).expect("Error changing window");
                 }
 
                 el = windows.next_element(el.unwrap());
