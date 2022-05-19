@@ -638,7 +638,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                         w.height = attr.height as u16;
 
                         unsafe {
-                            XMoveWindow(display, w.window_id, w.x as i32 - 10, w.y as i32 - 20);
+                            XMoveWindow(display, w.frame_id, w.x as i32 - 10, w.y as i32 - 20);
                             XResizeWindow(display, w.frame_id, (w.width + 20) as c_uint, (w.height + 25) as c_uint);
                         }
 
@@ -711,7 +711,7 @@ gl_FragColor = texture2D(tex, Texcoord);
                     }
                 }
 
-                if w.x != w.velocity.last_x_location {
+                if w.x != w.velocity.last_x_location { // todo: this needs to come before the window is drawn
                     w.velocity.x_speed -= (w.x - w.velocity.last_x_location) as f64 * 0.1;
                     w.velocity.last_x_location = w.x;
                     windows.change_element_at_index(i, w).expect("Error changing window");
